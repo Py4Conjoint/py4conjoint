@@ -1,0 +1,29 @@
+name: Publish to PyPI
+
+on:
+  workflow_dispatch:        # 手動でActionsを起動する
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+
+    permissions:
+      id-token: write       # PyPI Trusted Publisherに必要
+
+    steps:
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v4
+
+      - name: Pythonをセットアップ
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: ビルドツールをインストール
+        run: pip install build
+
+      - name: パッケージをビルド
+        run: python -m build
+
+      - name: PyPIにアップロード
+        uses: pypa/gh-action-pypi-publish@release/v1

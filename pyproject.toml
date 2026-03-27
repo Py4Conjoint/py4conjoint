@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "py4conjoint"
+version = "0.1.0"
+description = "Google Forms の回答CSVを評点型コンジョイント分析用のlong形式DataFrameに変換するツール"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.9"
+dependencies = [
+    "pandas>=1.5",
+]
+keywords = ["conjoint", "survey", "marketing", "pandas"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+    "Intended Audience :: Education",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering",
+]
+
+[project.urls]
+Homepage = "https://github.com/Py4Conjoint/py4conjoint"
+
+[tool.setuptools.packages.find]
+where = ["src"]
