@@ -1,6 +1,6 @@
 # py4conjoint
 
-Google Forms の回答CSVを評点型コンジョイント分析用のlong形式DataFrameに変換するPythonパッケージです。
+Microsoft/Google Forms の回答CSVを評点型コンジョイント分析用のlong形式DataFrameに変換するPythonパッケージです。
 
 ## インストール
 
