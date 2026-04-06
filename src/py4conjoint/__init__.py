@@ -1,7 +1,8 @@
 """
 py4conjoint
 ===========
-Google Forms の回答CSVを評点型コンジョイント分析用のlong形式DataFrameに変換する。
+Microsoft Forms / Google Forms の回答CSVを
+評点型コンジョイント分析用のlong形式DataFrameに変換する。
 
 インストール:
     pip install py4conjoint
@@ -16,10 +17,19 @@ Google Forms の回答CSVを評点型コンジョイント分析用のlong形式
         {"price": 10, "os": "android", "camera": "high"},      # P4
     ], index=["P1", "P2", "P3", "P4"])
 
+    # Microsoft Forms（デフォルト）
+    df = pc.forms_to_conjoint_data(
+        responses_csv = "responses.xlsx",
+        n_cards       = 4,
+        attributes    = cards,
+    )
+
+    # Google Forms
     df = pc.forms_to_conjoint_data(
         responses_csv = "responses.csv",
         n_cards       = 4,
         attributes    = cards,
+        forms         = "google",
     )
 
 使い方B（辞書のリストで渡す・従来形式）:
@@ -32,7 +42,7 @@ Google Forms の回答CSVを評点型コンジョイント分析用のlong形式
     ]
 
     df = pc.forms_to_conjoint_data(
-        responses_csv = "responses.csv",
+        responses_csv = "responses.xlsx",
         n_cards       = 4,
         attributes    = attributes,
     )
@@ -43,7 +53,7 @@ from __future__ import annotations
 import re
 import warnings
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, List, Literal, Optional, Sequence
 
 import pandas as pd
 
@@ -57,6 +67,7 @@ def forms_to_conjoint_data(
     n_cards: int,
     attributes: "pd.DataFrame | Sequence[Dict[str, Sequence]]",
     *,
+    forms: Literal["microsoft", "google"] = "microsoft",
     respondent_cols: Optional[Dict[str, str]] = None,
     card_id_prefix: str = "P",
     rating_colname: str = "rating",
@@ -65,12 +76,13 @@ def forms_to_conjoint_data(
     out_csv: Optional[str] = None,
 ) -> pd.DataFrame:
     """
-    Google Forms の回答CSVをlong形式DataFrameに変換する。
+    Microsoft Forms / Google Forms の回答ファイルをlong形式DataFrameに変換する。
 
     Parameters
     ----------
     responses_csv : str
-        Google Forms からダウンロードした回答CSV（UTF-8）のパス。
+        Forms からダウンロードした回答ファイルのパス。
+        Microsoft Forms の場合は .xlsx、Google Forms の場合は .csv。
 
     n_cards : int
         アンケートで提示したカード（プロファイル）の枚数。
@@ -106,6 +118,11 @@ def forms_to_conjoint_data(
 
         いずれの形式でも、行数（または水準リストの長さ）は n_cards と一致する必要がある。
 
+    forms : {"microsoft", "google"}, default "microsoft"
+        使用するFormsの種類を指定する。
+        "microsoft" : Microsoft Forms（.xlsx形式）
+        "google"    : Google Forms（.csv形式）
+
     respondent_cols : dict, optional
         回答者属性として残したい列の対応辞書。
         {"CSVの列名": "出力DataFrameの列名"} の形式。
@@ -139,40 +156,63 @@ def forms_to_conjoint_data(
     FileNotFoundError
         responses_csv が存在しない場合。
     ValueError
+        forms が "microsoft" または "google" 以外の場合。
         attributes の行数（または水準リストの長さ）が n_cards と一致しない場合。
         評点列が n_cards 列分見つからない場合。
     """
 
     # ------------------------------------------------------------------
     # 0. 入力チェック
-    #    attributes が DataFrame の場合は辞書のリスト形式に正規化する
     # ------------------------------------------------------------------
+    if forms not in ("microsoft", "google"):
+        raise ValueError(
+            f"forms='{forms}' は無効な値です。\n"
+            "'microsoft' または 'google' を指定してください。"
+        )
+
     attributes = _normalize_attributes(attributes, n_cards)
     _check_attributes(attributes, n_cards)
 
     csv_path = Path(responses_csv)
     if not csv_path.exists():
         raise FileNotFoundError(
-            f"CSVファイルが見つかりません: {responses_csv}\n"
+            f"ファイルが見つかりません: {responses_csv}\n"
             "ファイル名とパスを確認してください。"
         )
 
-    # ------------------------------------------------------------------
-    # 1. CSV読み込み
-    #    Google Forms は UTF-8 で出力されるが、BOM付きの場合も吸収する
-    # ------------------------------------------------------------------
-    raw = pd.read_csv(csv_path, encoding="utf-8-sig")
+    # forms="microsoft" なのに .xlsx/.xls 以外の拡張子の場合は警告を出す
+    if forms == "microsoft" and csv_path.suffix.lower() not in (".xlsx", ".xls"):
+        warnings.warn(
+            f"forms='microsoft' が指定されていますが、\n"
+            f"ファイルの拡張子が '{csv_path.suffix}' です。\n"
+            "Microsoft Forms のダウンロードファイルは通常 .xlsx 形式です。\n"
+            "Google Forms のファイルを使う場合は forms='google' を指定してください。",
+            UserWarning,
+            stacklevel=2,
+        )
 
     # ------------------------------------------------------------------
-    # 2. Google Forms の管理列を除外して評点列・回答者属性列を特定する
+    # 1. ファイル読み込み
+    #    Microsoft Forms → .xlsx（openpyxl）
+    #    Google Forms   → .csv（UTF-8 / BOM付きUTF-8）
     # ------------------------------------------------------------------
-    forms_system_cols = _detect_forms_system_cols(raw)
+    if forms == "microsoft":
+        raw = _read_microsoft_forms(csv_path)
+    else:
+        raw = _read_google_forms(csv_path)
+
+    # ------------------------------------------------------------------
+    # 2. 管理列を除外して評点列・回答者属性列を特定する
+    # ------------------------------------------------------------------
+    if forms == "microsoft":
+        system_cols = _detect_microsoft_system_cols(raw)
+    else:
+        system_cols = _detect_google_system_cols(raw)
 
     respondent_rename: Dict[str, str] = respondent_cols or {}
     respondent_src_cols = list(respondent_rename.keys())
 
-    # 管理列でも回答者属性列でもない列が評点列の候補
-    non_rating_cols = set(forms_system_cols) | set(respondent_src_cols)
+    non_rating_cols = set(system_cols) | set(respondent_src_cols)
     rating_candidate_cols = [c for c in raw.columns if c not in non_rating_cols]
 
     rating_cols = _pick_rating_cols(rating_candidate_cols, raw, n_cards, responses_csv)
@@ -180,8 +220,7 @@ def forms_to_conjoint_data(
     # ------------------------------------------------------------------
     # 3. 回答者IDを付与
     # ------------------------------------------------------------------
-    n_respondents = len(raw)
-    raw[respondent_id_colname] = range(1, n_respondents + 1)
+    raw[respondent_id_colname] = range(1, len(raw) + 1)
 
     # ------------------------------------------------------------------
     # 4. 回答者属性列を選択・リネーム
@@ -195,7 +234,7 @@ def forms_to_conjoint_data(
     else:
         respondent_dst_cols = []
 
-    # 評点列をカードID（文字列）にリネームして wide→long 変換しやすくする
+    # 評点列をプロファイルID（文字列）にリネームして wide→long 変換しやすくする
     card_ids = [f"{card_id_prefix}{i+1}" for i in range(n_cards)]
     rating_rename = dict(zip(rating_cols, card_ids))
     df_wide = df_wide.rename(columns=rating_rename)
@@ -241,37 +280,94 @@ def forms_to_conjoint_data(
 
 
 # ---------------------------------------------------------------------------
-# 内部ヘルパー関数
+# 内部ヘルパー関数：ファイル読み込み
 # ---------------------------------------------------------------------------
 
+def _read_microsoft_forms(path: Path) -> pd.DataFrame:
+    """
+    Microsoft Forms の回答ファイルを読み込む。
+    .xlsx を想定するが、.csv（BOM付きUTF-8）も受け付ける。
+    """
+    suffix = path.suffix.lower()
+    if suffix in (".xlsx", ".xls"):
+        try:
+            return pd.read_excel(path, engine="openpyxl")
+        except ImportError:
+            raise ImportError(
+                "Microsoft Forms の .xlsx ファイルを読み込むには openpyxl が必要です。\n"
+                "以下のコマンドでインストールしてください：\n"
+                "  pip install openpyxl"
+            )
+    # .csv の場合（BOM付きUTF-8）
+    return pd.read_csv(path, encoding="utf-8-sig")
+
+
+def _read_google_forms(path: Path) -> pd.DataFrame:
+    """Google Forms の回答CSVを読み込む（UTF-8 / BOM付きUTF-8）。"""
+    return pd.read_csv(path, encoding="utf-8-sig")
+
+
+# ---------------------------------------------------------------------------
+# 内部ヘルパー関数：管理列の検出
+# ---------------------------------------------------------------------------
+
+# Microsoft Forms が自動生成する管理列のパターン
+_MICROSOFT_SYSTEM_PATTERNS = [
+    r"^id$",
+    r"^start\s*time$",
+    r"^completion\s*time$",
+    r"^email$",
+    r"^name$",
+    r"^last\s*modified\s*time$",
+    r"^開始時刻$",
+    r"^完了時刻$",
+    r"^最終変更時刻$",
+    r"^メール(アドレス)?$",
+    r"^名前$",
+]
+
 # Google Forms が自動生成する管理列のパターン
-_FORMS_SYSTEM_PATTERNS = [
+_GOOGLE_SYSTEM_PATTERNS = [
     r"^timestamp$",
+    r"^タイムスタンプ$",
     r"^開始時刻$",
     r"^完了時刻$",
     r"^最終変更時刻$",
     r"^メール(アドレス)?$",
     r"^名前$",
     r"^email$",
+    r"^email\s*address$",
     r"^start\s*time$",
     r"^completion\s*time$",
     r"^last\s*modified\s*time$",
-    r"^id$",
-    r"^名前$",
 ]
 
 
-def _detect_forms_system_cols(df: pd.DataFrame) -> List[str]:
-    """Google Forms の管理列（時刻・メール等）を列名のパターンで検出する。"""
+def _detect_microsoft_system_cols(df: pd.DataFrame) -> List[str]:
+    """Microsoft Forms の管理列を検出する。"""
+    return _detect_system_cols(df, _MICROSOFT_SYSTEM_PATTERNS)
+
+
+def _detect_google_system_cols(df: pd.DataFrame) -> List[str]:
+    """Google Forms の管理列を検出する。"""
+    return _detect_system_cols(df, _GOOGLE_SYSTEM_PATTERNS)
+
+
+def _detect_system_cols(df: pd.DataFrame, patterns: List[str]) -> List[str]:
+    """指定したパターンに一致する管理列を検出する共通処理。"""
     system = []
     for col in df.columns:
         col_lower = col.strip().lower()
-        for pattern in _FORMS_SYSTEM_PATTERNS:
+        for pattern in patterns:
             if re.match(pattern, col_lower, re.IGNORECASE):
                 system.append(col)
                 break
     return system
 
+
+# ---------------------------------------------------------------------------
+# 内部ヘルパー関数：評点列の選択・バリデーション
+# ---------------------------------------------------------------------------
 
 def _pick_rating_cols(
     candidates: List[str],
@@ -287,7 +383,6 @@ def _pick_rating_cols(
     2. 候補列の右端 n_cards 列を採用（数値変換できるか確認）
     3. 上記でも取得できなければ ValueError
     """
-    # 数値型の候補列だけ抽出
     numeric_candidates = [
         c for c in candidates
         if pd.api.types.is_numeric_dtype(df[c])
@@ -295,20 +390,16 @@ def _pick_rating_cols(
     ]
 
     if len(numeric_candidates) >= n_cards:
-        # 右端 n_cards 列を使う（Google Forms は設問順に列が並ぶため）
-        selected = numeric_candidates[-n_cards:]
-        return selected
+        return numeric_candidates[-n_cards:]
 
-    # フォールバック：候補全体の右端 n_cards 列
     if len(candidates) >= n_cards:
         selected = candidates[-n_cards:]
-        # 数値変換できるか確認
         for col in selected:
             if not _is_coercible_to_numeric(df[col]):
                 raise ValueError(
                     f"評点列の自動検出に失敗しました。\n"
                     f"列 '{col}' を数値に変換できません。\n"
-                    f"CSVの列構造を確認してください: {csv_path}"
+                    f"ファイルの列構造を確認してください: {csv_path}"
                 )
         return selected
 
@@ -316,15 +407,18 @@ def _pick_rating_cols(
         f"評点列が {n_cards} 列分見つかりませんでした。\n"
         f"評点列の候補: {candidates}\n"
         f"n_cards={n_cards} に対して候補が {len(candidates)} 列しかありません。\n"
-        f"CSVの列構造を確認してください: {csv_path}"
+        f"ファイルの列構造を確認してください: {csv_path}"
     )
 
 
 def _is_coercible_to_numeric(series: pd.Series) -> bool:
     """pd.to_numeric で変換できるか（NaN以外の値が1つ以上あるか）を確認する。"""
-    converted = pd.to_numeric(series, errors="coerce")
-    return converted.notna().any()
+    return pd.to_numeric(series, errors="coerce").notna().any()
 
+
+# ---------------------------------------------------------------------------
+# 内部ヘルパー関数：カード設計・属性の処理
+# ---------------------------------------------------------------------------
 
 def _build_card_design(
     card_ids: List[str],
@@ -360,7 +454,6 @@ def _normalize_attributes(
             {col: list(attributes[col])}
             for col in attributes.columns
         ]
-    # 辞書のリスト形式はそのまま返す
     return list(attributes)
 
 
@@ -387,7 +480,7 @@ def _check_attributes(
         if not isinstance(attr_dict, dict) or len(attr_dict) != 1:
             raise ValueError(
                 f"attributes[{i}] は キー1つの辞書である必要があります。\n"
-                f"例：{{\"wage\": [1000, 1300, 1000, 1300]}}\n"
+                f"例：{{\"price\": [6, 10, 6, 10]}}\n"
                 f"実際の値：{attr_dict}"
             )
         attr_name, levels = list(attr_dict.items())[0]
