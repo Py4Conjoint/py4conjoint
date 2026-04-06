@@ -3,6 +3,9 @@
 All notable changes to this project will be documented in this file.
 
 ---
+## [0.1.2] - 2026-04-06
+- 引数名 `responses_csv` を `responses_file` に変更した（`.xlsx` にも対応するため）。
+
 
 ## [0.1.1] - 2026-04-06
 

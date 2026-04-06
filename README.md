@@ -30,19 +30,19 @@ cards = pd.DataFrame({    # P1         P2       P3        P4
 
 # Microsoft Forms の回答xlsxをlong形式に変換（デフォルト）
 df = pc.forms_to_conjoint_data(
-    responses_csv = "responses.xlsx",
-    n_cards       = 4,
-    attributes    = cards,
+    responses_file = "responses.xlsx",
+    n_cards        = 4,
+    attributes     = cards,
     respondent_cols= {"性別": "gender"},
 )
 
 # Google Forms の回答CSVをlong形式に変換
 df = pc.forms_to_conjoint_data(
-    responses_csv = "responses.csv",
-    n_cards       = 4,
-    attributes    = cards,
+    responses_file = "responses.csv",
+    n_cards        = 4,
+    attributes     = cards,
     respondent_cols= {"性別": "gender"},
-    forms         = "google",
+    forms          = "google",
 )
 ```
 

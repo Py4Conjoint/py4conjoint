@@ -1,7 +1,7 @@
 """
 py4conjoint
 ===========
-Microsoft Forms / Google Forms の回答CSVを
+Microsoft Forms / Google Forms の回答ファイルを
 評点型コンジョイント分析用のlong形式DataFrameに変換する。
 
 インストール:
@@ -19,16 +19,18 @@ Microsoft Forms / Google Forms の回答CSVを
 
     # Microsoft Forms（デフォルト）
     df = pc.forms_to_conjoint_data(
-        responses_csv = "responses.xlsx",
+        responses_file = "responses.xlsx",
         n_cards       = 4,
         attributes    = cards,
+        respondent_cols= {"性別": "gender"},
     )
 
     # Google Forms
     df = pc.forms_to_conjoint_data(
-        responses_csv = "responses.csv",
+        responses_file = "responses.csv",
         n_cards       = 4,
         attributes    = cards,
+        respondent_cols= {"性別": "gender"},
         forms         = "google",
     )
 
@@ -42,7 +44,7 @@ Microsoft Forms / Google Forms の回答CSVを
     ]
 
     df = pc.forms_to_conjoint_data(
-        responses_csv = "responses.xlsx",
+        responses_file = "responses.xlsx",
         n_cards       = 4,
         attributes    = attributes,
     )
@@ -63,7 +65,7 @@ import pandas as pd
 # ---------------------------------------------------------------------------
 
 def forms_to_conjoint_data(
-    responses_csv: str,
+    responses_file: str,
     n_cards: int,
     attributes: "pd.DataFrame | Sequence[Dict[str, Sequence]]",
     *,
@@ -80,7 +82,7 @@ def forms_to_conjoint_data(
 
     Parameters
     ----------
-    responses_csv : str
+    responses_file : str
         Forms からダウンロードした回答ファイルのパス。
         Microsoft Forms の場合は .xlsx、Google Forms の場合は .csv。
 
@@ -154,7 +156,7 @@ def forms_to_conjoint_data(
     Raises
     ------
     FileNotFoundError
-        responses_csv が存在しない場合。
+        responses_file が存在しない場合。
     ValueError
         forms が "microsoft" または "google" 以外の場合。
         attributes の行数（または水準リストの長さ）が n_cards と一致しない場合。
@@ -173,10 +175,10 @@ def forms_to_conjoint_data(
     attributes = _normalize_attributes(attributes, n_cards)
     _check_attributes(attributes, n_cards)
 
-    csv_path = Path(responses_csv)
+    csv_path = Path(responses_file)
     if not csv_path.exists():
         raise FileNotFoundError(
-            f"ファイルが見つかりません: {responses_csv}\n"
+            f"ファイルが見つかりません: {responses_file}\n"
             "ファイル名とパスを確認してください。"
         )
 
@@ -215,7 +217,7 @@ def forms_to_conjoint_data(
     non_rating_cols = set(system_cols) | set(respondent_src_cols)
     rating_candidate_cols = [c for c in raw.columns if c not in non_rating_cols]
 
-    rating_cols = _pick_rating_cols(rating_candidate_cols, raw, n_cards, responses_csv)
+    rating_cols = _pick_rating_cols(rating_candidate_cols, raw, n_cards, responses_file)
 
     # ------------------------------------------------------------------
     # 3. 回答者IDを付与

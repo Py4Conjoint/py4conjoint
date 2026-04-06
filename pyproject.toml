@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "py4conjoint"
-version = "0.1.1"
-description = "Google Forms の回答CSVを評点型コンジョイント分析用のlong形式DataFrameに変換するツール"
+version = "0.1.2"
+description = "Microsoft/Google Forms の回答CSVを評点型コンジョイント分析用のlong形式DataFrameに変換するツール"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.9"
