@@ -17,7 +17,7 @@ import py4conjoint as pc
 
 def make_synthetic_data(seed: int = 0, n_resp: int = 30) -> pd.DataFrame:
     """
-    ノートブックと同じ設計（4カード, 3属性）の合成データを作る。
+    ノートブックと同じ設計（4プロファイル, 3属性）の合成データを作る。
     """
     rng = np.random.default_rng(seed)
     cards = pd.DataFrame(
@@ -39,7 +39,7 @@ def make_synthetic_data(seed: int = 0, n_resp: int = 30) -> pd.DataFrame:
             u += 1.2 if row["camera"] == "高性能" else -1.2
             u += rng.normal(0, 0.5)
             rating = int(np.clip(round(u), 1, 7))
-            rows.append({"回答者ID": r, "カードID": cid, "rating": rating, **row})
+            rows.append({"回答者ID": r, "プロファイルID": cid, "rating": rating, **row})
     return pd.DataFrame(rows)
 
 
@@ -135,9 +135,9 @@ def test_wtp():
     wtp = result.wtp()
     print(wtp)
     # appleの方がandroidより魅力 → 正のWTP
-    assert wtp.loc["os_0", "wtp"] > 0
+    assert wtp.loc["os_0", "支払意思額"] > 0
     # カメラ高性能 → 正のWTP
-    assert wtp.loc["camera_0", "wtp"] > 0
+    assert wtp.loc["camera_0", "支払意思額"] > 0
     # 新式: (price_max - price_min) / abs(b_price * 2)
     b_price = result.params["price_0"]
     expected_unit = (10 - 6) / abs(b_price * 2)
@@ -203,32 +203,41 @@ def test_diagnostics_warning_low_r2():
 
 
 def test_diagnostics_price_insignificant():
-    """価格係数が有意でない(p≥0.10)場合に price_insignificant 警告が出る"""
-    # 価格の効果がほぼない合成データ
-    rng = np.random.default_rng(42)
-    n = 80
-    df = pd.DataFrame({
-        "rating": rng.integers(1, 8, n),          # 完全ランダム（価格は無関係）
-        "price":  rng.choice([6, 10], n),
-        "os":     rng.choice(["android", "apple"], n),
-    })
+    """価格に真の効果がない場合に price_insignificant 中警告が出る（確定的テスト）。
+
+    直交バランスデザイン（price_0 ⊥ os_0）で os のみ評点に影響するデータを生成する。
+    このとき b_hat_price ≈ 0 となり p 値が大きくなることが設計上保証される。
+    """
+    cards_order = ["P1", "P2", "P3", "P4"]
+    price_vals  = [6, 10, 6, 10]
+    os_vals     = ["android", "apple", "apple", "android"]
+    n_resp = 20
+    rows = []
+    for r in range(1, n_resp + 1):
+        resp_offset = float(r % 2)      # 回答者ごとの定数（price_0 ⊥ offset）
+        for i, cid in enumerate(cards_order):
+            os_effect     = 1.5 if os_vals[i] == "apple" else -1.5
+            tiny_price_ef = 0.001 * (1 if price_vals[i] == 6 else -1)  # 極小、事実上ゼロ
+            rating = float(np.clip(4.0 + os_effect + resp_offset + tiny_price_ef, 1, 7))
+            rows.append({
+                "回答者ID": r, "プロファイルID": cid, "rating": rating,
+                "price": price_vals[i], "os": os_vals[i],
+            })
+    df = pd.DataFrame(rows)
     df_coded = pc.encode(df, reference_levels={"price": 10, "os": "android"})
     result = pc.fit(df_coded)
+    _ = result.wtp()
 
-    # wtp を呼ぶことで価格有意性チェックが走る
-    wtp = result.wtp()
+    p_price = float(result.ols.pvalues["price_0"])
+    print(f"  price p値 = {p_price:.4f}")
+    assert p_price >= 0.10, \
+        f"price 係数が有意になった（p={p_price:.4f}）。データ構築を確認してください"
+
     w_df = result.warnings()
-    print(w_df)
-
-    p_price = float(result.model_result.pvalues["price_0"])
-    if p_price >= 0.10:
-        assert "price_insignificant" in w_df["category"].values
-        row = w_df[w_df["category"] == "price_insignificant"].iloc[0]
-        assert row["severity"] == "中"
-        print(f"  price_insignificant 警告を確認（p値 = {p_price:.3f}）")
-    else:
-        print(f"  このシードでは価格係数が有意（p値 = {p_price:.3f}）→ 警告なし（想定内）")
-
+    assert "price_insignificant" in w_df["category"].values, \
+        f"price_insignificant が出ていない（p={p_price:.4f}）"
+    row = w_df[w_df["category"] == "price_insignificant"].iloc[0]
+    assert row["severity"] == "中"
     print("OK test_diagnostics_price_insignificant")
 
 
@@ -257,11 +266,9 @@ def test_diagnostics_wtp_extrapolation():
     assert "wtp_extrapolation" in w_df["category"].values, \
         f"wtp_extrapolation 警告が出ていない。WTP:\n{wtp}"
     ext_rows = w_df[w_df["category"] == "wtp_extrapolation"]
-    # 価格係数が有意かどうかで重大度が変わる
-    p_price = float(result.model_result.pvalues["price_0"])
-    expected_sev = "大" if p_price >= 0.10 else "中"
-    assert ext_rows.iloc[0]["severity"] == expected_sev, \
-        f"期待: {expected_sev}, 実際: {ext_rows.iloc[0]['severity']}"
+    # wtp_extrapolation は常に「中」
+    assert ext_rows.iloc[0]["severity"] == "中", \
+        f"期待: 中, 実際: {ext_rows.iloc[0]['severity']}"
     print(f"  wtp_extrapolation 警告を確認（重大度={ext_rows.iloc[0]['severity']}）")
     print("OK test_diagnostics_wtp_extrapolation")
 
@@ -326,14 +333,13 @@ def test_e2e_real_data():
     # フルパイプライン
     df = pc.forms_to_conjoint_data(
         responses_file=xlsx,
-        n_cards=4,
         attributes=profiles,
     )
     df = pc.encode(df, reference_levels={"price": 10, "os": "android", "camera": "標準"})
     result = pc.fit(df)
 
     # ノートブック方式と数値一致
-    df_nb = pc.forms_to_conjoint_data(responses_file=xlsx, n_cards=4, attributes=profiles)
+    df_nb = pc.forms_to_conjoint_data(responses_file=xlsx, attributes=profiles)
     df_nb["price_low"]   = df_nb["price"].map({10: -1, 6: 1})
     df_nb["os_apple"]    = df_nb["os"].map({"android": -1, "apple": 1})
     df_nb["camera_high"] = df_nb["camera"].map({"標準": -1, "高性能": 1})
@@ -347,7 +353,7 @@ def test_e2e_real_data():
 
     wtp = result.wtp()
     apple_wtp_nb = -(6-10) / res_nb.params["price_low"] * res_nb.params["os_apple"]
-    assert abs(wtp.loc["os_0", "wtp"] - apple_wtp_nb) < 1e-9
+    assert abs(wtp.loc["os_0", "支払意思額"] - apple_wtp_nb) < 1e-9
 
     # 実データで出るはずの警告を確認
     w_df = result.warnings()
@@ -403,6 +409,204 @@ def test_unit_rating_money_returns_float():
     print("OK test_unit_rating_money_returns_float")
 
 
+def test_few_respondents_major():
+    """回答者が1人のとき few_respondents 大警告が出る"""
+    df = make_synthetic_data(seed=0, n_resp=1)
+    df_coded = pc.encode(
+        df, reference_levels={"price": 10, "os": "android", "camera": "標準"}
+    )
+    result = pc.fit(df_coded)
+    w_df = result.warnings(category="few_respondents")
+    assert len(w_df) == 1, f"few_respondents 警告が {len(w_df)} 件"
+    assert w_df.iloc[0]["severity"] == "大"
+    print("OK test_few_respondents_major")
+
+
+def test_few_respondents_minor():
+    """回答者が3人のとき few_respondents 中警告が出る"""
+    df = make_synthetic_data(seed=0, n_resp=3)
+    df_coded = pc.encode(
+        df, reference_levels={"price": 10, "os": "android", "camera": "標準"}
+    )
+    result = pc.fit(df_coded)
+    w_df = result.warnings(category="few_respondents")
+    assert len(w_df) == 1, f"few_respondents 警告が {len(w_df)} 件"
+    assert w_df.iloc[0]["severity"] == "中"
+    print("OK test_few_respondents_minor")
+
+
+def test_few_respondents_no_warning():
+    """回答者が5人（境界値）のとき few_respondents 警告が出ない"""
+    df = make_synthetic_data(seed=0, n_resp=5)
+    df_coded = pc.encode(
+        df, reference_levels={"price": 10, "os": "android", "camera": "標準"}
+    )
+    result = pc.fit(df_coded)
+    w_df = result.warnings(category="few_respondents")
+    assert len(w_df) == 0, f"n=5 なのに few_respondents 警告が出た:\n{w_df}"
+    print("OK test_few_respondents_no_warning")
+
+
+def test_price_sign_negative():
+    """高価格ほど評点が高い（高級品）データで price_sign_negative 中警告が出る"""
+    rng = np.random.default_rng(99)
+    n_resp = 20
+    rows = []
+    for r in range(1, n_resp + 1):
+        for price, os in [(6, "android"), (10, "android"), (6, "apple"), (10, "apple")]:
+            luxury_effect = 2.0 if price == 10 else -2.0
+            rating = float(np.clip(4.0 + luxury_effect + rng.normal(0, 0.3), 1, 7))
+            rows.append({"回答者ID": r, "price": price, "os": os, "rating": rating})
+    df = pd.DataFrame(rows)
+    # 高い方を基準 → price_0=+1 が price=6（安い方）→ luxury では b_price < 0
+    df_coded = pc.encode(df, reference_levels={"price": 10, "os": "android"})
+    result = pc.fit(df_coded)
+    b_price = float(result.params["price_0"])
+    assert b_price < 0, f"b_price={b_price:.4f}: 高級品データなのに符号が正"
+    w_df = result.warnings(category="price_sign_negative")
+    assert len(w_df) == 1
+    assert w_df.iloc[0]["severity"] == "中"
+    print(f"  b_price = {b_price:.4f}")
+    print("OK test_price_sign_negative")
+
+
+def test_summary_slim_false():
+    """summary(slim=False) は statsmodels の詳細表（英語）を返す"""
+    df = make_synthetic_data(seed=0, n_resp=20)
+    df_coded = pc.encode(
+        df, reference_levels={"price": 10, "os": "android", "camera": "標準"}
+    )
+    result = pc.fit(df_coded)
+    s_full = result.summary(slim=False)
+    assert "OLS Regression Results" in s_full
+    s_slim = result.summary(slim=True)
+    assert s_full != s_slim
+    assert "コンジョイント分析" in s_slim
+    print("OK test_summary_slim_false")
+
+
+def test_auto_reference_levels():
+    """auto_reference_levels: 数値列→最大値、カテゴリ列→辞書順先頭"""
+    import warnings as _warnings
+    df = make_synthetic_data(seed=0, n_resp=5)
+    with _warnings.catch_warnings(record=True) as w:
+        _warnings.simplefilter("always")
+        refs = pc.auto_reference_levels(df, ["price", "os", "camera"])
+    # 数値列 price: 最大値 = 10
+    assert refs["price"] == 10, f"price の基準値が {refs['price']} (期待: 10)"
+    # カテゴリ列 os: 辞書順先頭（"android" < "apple"）
+    assert refs["os"] == "android", f"os の基準値が {refs['os']} (期待: 'android')"
+    # カテゴリ列 camera: 辞書順先頭（"標準" < "高性能" in Unicode order）
+    assert refs["camera"] == sorted(["標準", "高性能"])[0]
+    # UserWarning が発生していること
+    assert any(issubclass(wi.category, UserWarning) for wi in w)
+    print(f"  refs = {refs}")
+    print("OK test_auto_reference_levels")
+
+
+def test_market_share_max():
+    """method='max' は最大効用の製品にシェア1.0、他は0.0を割り当てる"""
+    df = make_synthetic_data(seed=0, n_resp=20)
+    df_coded = pc.encode(
+        df, reference_levels={"price": 10, "os": "android", "camera": "標準"}
+    )
+    result = pc.fit(df_coded)
+    products = pd.DataFrame(
+        {
+            "price_0":  [ 1, -1],
+            "os_0":     [ 1, -1],
+            "camera_0": [ 1, -1],
+        },
+        index=["製品A", "製品B"],
+    )
+    share = result.market_share(products, method="max")
+    # 製品Aがすべてプラス属性 → 最大効用 → シェア1
+    assert share["製品A"] == 1.0
+    assert share["製品B"] == 0.0
+    assert abs(share.sum() - 1.0) < 1e-9
+    print("OK test_market_share_max")
+
+
+def test_encode_drop_original():
+    """drop_original=True で元の属性列が削除される"""
+    df = make_synthetic_data(seed=0, n_resp=5)
+    out = pc.encode(
+        df,
+        reference_levels={"price": 10, "os": "android", "camera": "標準"},
+        drop_original=True,
+    )
+    for col in ("price", "os", "camera"):
+        assert col not in out.columns, f"'{col}' が残っている"
+    for col in ("price_0", "os_0", "camera_0"):
+        assert col in out.columns, f"'{col}' がない"
+    print("OK test_encode_drop_original")
+
+
+def test_encode_inplace():
+    """inplace=True は入力 DataFrame を直接書き換えて同じオブジェクトを返す"""
+    df = make_synthetic_data(seed=0, n_resp=5)
+    original_id = id(df)
+    out = pc.encode(
+        df,
+        reference_levels={"price": 10, "os": "android", "camera": "標準"},
+        inplace=True,
+    )
+    assert id(out) == original_id, "inplace=True なのに別オブジェクトが返された"
+    assert "price_0" in out.columns
+    assert "os_0" in out.columns
+    print("OK test_encode_inplace")
+
+
+def test_encode_binary_suffix_map():
+    """binary_suffix_map でカスタム列名サフィックスが使われる"""
+    df = make_synthetic_data(seed=0, n_resp=5)
+    out = pc.encode(
+        df,
+        reference_levels={"price": 10, "os": "android", "camera": "標準"},
+        binary_suffix_map={"price": "low", "os": "apple"},
+    )
+    assert "price_low" in out.columns, "price_low がない"
+    assert "os_apple" in out.columns, "os_apple がない"
+    assert "price_0" not in out.columns, "price_0 が残っている（カスタム名に上書きされるはず）"
+    assert "os_0" not in out.columns, "os_0 が残っている（カスタム名に上書きされるはず）"
+    # binary_suffix_map 未指定の属性はデフォルト命名
+    assert "camera_0" in out.columns, "camera_0 がない"
+    print("OK test_encode_binary_suffix_map")
+
+
+def test_importance_ratio():
+    """importance(as_percent=False) は合計が1.0の比率を返す"""
+    df = make_synthetic_data(seed=0, n_resp=20)
+    df_coded = pc.encode(
+        df, reference_levels={"price": 10, "os": "android", "camera": "標準"}
+    )
+    result = pc.fit(df_coded)
+    imp = result.importance(as_percent=False)
+    assert abs(imp["importance"].sum() - 1.0) < 1e-6, \
+        f"合計が1.0にならない: {imp['importance'].sum()}"
+    assert (imp["importance"] > 0).all(), "重要度が0以下の属性がある"
+    print("OK test_importance_ratio")
+
+
+def test_wtp_attrs():
+    """wtp() の戻り値 DataFrame.attrs に必要なキーと正しい値が入っている"""
+    df = make_synthetic_data(seed=0, n_resp=20)
+    df_coded = pc.encode(
+        df, reference_levels={"price": 10, "os": "android", "camera": "標準"}
+    )
+    result = pc.fit(df_coded)
+    wtp = result.wtp()
+    for key in ("price_range", "wtp_price_factor", "p_price", "price_low", "price_high"):
+        assert key in wtp.attrs, f"attrs に '{key}' がない"
+    assert wtp.attrs["price_low"] == 6
+    assert wtp.attrs["price_high"] == 10
+    assert abs(wtp.attrs["price_range"] - 4.0) < 1e-9
+    b_price = float(result.params["price_0"])
+    expected_factor = 4.0 / b_price   # -(low-high)/b = -(6-10)/b = 4/b
+    assert abs(wtp.attrs["wtp_price_factor"] - expected_factor) < 1e-9
+    print("OK test_wtp_attrs")
+
+
 if __name__ == "__main__":
     test_encode_binary_three_attrs()
     test_encode_three_levels()
@@ -417,4 +621,16 @@ if __name__ == "__main__":
     test_price_col_override()
     test_e2e_real_data()
     test_unit_rating_money_returns_float()
+    test_few_respondents_major()
+    test_few_respondents_minor()
+    test_few_respondents_no_warning()
+    test_price_sign_negative()
+    test_summary_slim_false()
+    test_auto_reference_levels()
+    test_market_share_max()
+    test_encode_drop_original()
+    test_encode_inplace()
+    test_encode_binary_suffix_map()
+    test_importance_ratio()
+    test_wtp_attrs()
     print("\nすべてのテストがパスしました。")

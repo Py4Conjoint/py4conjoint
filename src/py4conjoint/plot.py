@@ -167,7 +167,7 @@ def plot_partworth(
 
     Notes
     -----
-    水準名は符号化列名（例：``price_6``, ``os_apple``）から復元する。
+    水準名は符号化列名（例：``price_0``, ``os_0``）から復元する。
     基準水準は ``{属性名}（基準）`` のように表示される。
     """
     _ensure_japanese_font()
@@ -246,12 +246,12 @@ def plot_wtp(
     _ensure_japanese_font()
     wtp = result.wtp()
     if sort:
-        wtp = wtp.sort_values("wtp")
+        wtp = wtp.sort_values("支払意思額")
 
     if ax is None:
         fig, ax = plt.subplots(figsize=(7, max(2.5, 0.5 * len(wtp) + 1.5)))
 
-    ax.barh(wtp.index, wtp["wtp"], color=color)
+    ax.barh(wtp.index, wtp["支払意思額"], color=color)
     ax.axvline(0, color="gray", linewidth=0.8)
 
     label_unit = f"（{price_unit}）" if price_unit else ""
@@ -259,8 +259,8 @@ def plot_wtp(
     ax.set_title(title or "属性のWTP（支払意思額）")
 
     if show_values:
-        max_abs = max(abs(wtp["wtp"]).max(), 1e-9)
-        for y, v in enumerate(wtp["wtp"]):
+        max_abs = max(abs(wtp["支払意思額"]).max(), 1e-9)
+        for y, v in enumerate(wtp["支払意思額"]):
             offset = 0.02 * max_abs
             x = v + offset if v >= 0 else v - offset
             ha = "left" if v >= 0 else "right"

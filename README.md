@@ -25,27 +25,26 @@ Google Colab では：
 import pandas as pd
 import py4conjoint as pc
 
-# カード設計（プロファイル）を作成
-cards = pd.DataFrame({
-    "price":  [6, 10, 6, 10],
-    "os":     ["android", "apple", "apple", "android"],
-    "camera": ["標準", "標準", "高性能", "高性能"],
-}, index=["P1", "P2", "P3", "P4"])
+# プロファイル設計を作成
+profiles = { # P1         P2       P3        P4
+    "price":  [6,         10,      6,        10],
+    "os":     ["android", "apple", "apple",  "android"],
+    "camera": ["標準",    "標準",  "高性能", "高性能"],
+}
 
 # Microsoft Forms の回答ファイルを読み込む（デフォルト）
 df = pc.forms_to_conjoint_data(
-    responses_file="responses.xlsx",
-    n_cards=4,
-    attributes=cards,
-    respondent_cols={"性別": "gender"},
+    responses_file  = "responses.xlsx",
+    attributes      = profiles,
+    respondent_cols = {"性別": "gender"},
 )
 
 # Google Forms の場合
 df = pc.forms_to_conjoint_data(
-    responses_file="responses.csv",
-    n_cards=4,
-    attributes=cards,
-    forms="google",
+    responses_file  = "responses.csv",
+    attributes      = profiles,
+    respondent_cols = {"性別": "gender"},
+    forms           = "google",
 )
 ```
 
@@ -54,10 +53,15 @@ df = pc.forms_to_conjoint_data(
 ```python
 df_coded = pc.encode(
     df,
-    reference_levels={
-        "price":  10,        # 高い方を基準（評点が低くなりそうな水準を選ぶ）
+    reference_levels = {
+        "price":  10,
         "os":     "android",
-        "camera": "標準",
+        "camera": "標準"
+    },
+    binary_suffix_map = {
+        "price":  "low",
+        "os":     "apple",
+        "camera": "high"
     },
 )
 ```
@@ -79,12 +83,12 @@ print(result.summary())
 自由度修正 R²  : 0.9571
 
 【推定された係数（部分効用 part-worth）】
-  変数名                      係数         p値    有意
-  ------------------------- ---------- ---------- -----
-  切片 (b0)                    4.2417     0.0000   ***
-  price_6                    1.2583     0.0000   ***
-  os_apple                   0.9083     0.0000   ***
-  camera_高性能               0.5917     0.0000   ***
+  変数                            係数        p値  有意性
+  ------------------------- ---------- ----------  ------
+  Intercept                     4.2417     0.0000    ***
+  price_low                     1.2583     0.0000    ***
+  os_apple                      0.9083     0.0000    ***
+  camera_high                   0.5917     0.0000    ***
 
   有意水準: *** p<0.001  ** p<0.01  * p<0.05  . p<0.1
 ============================================================
@@ -103,10 +107,10 @@ result.importance()
 
 # WTP（支払意思額）
 result.wtp()
-#                    coef       wtp
+#                      係数  支払意思額
 # 属性（符号化列名）
-# os_apple         0.9083    2.8874
-# camera_高性能    0.5917    1.8805
+# os_apple           0.9083     2.8874
+# camera_high        0.5917     1.8805
 
 # 評点1点の金額換算
 result.unit_rating_money()
@@ -114,9 +118,9 @@ result.unit_rating_money()
 
 # 市場シェア予測
 products = pd.DataFrame({
-    "price_6":       [1, -1],
-    "os_apple":      [1,  1],
-    "camera_高性能": [1, -1],
+    "price_low":   [1, -1],
+    "os_apple":    [1,  1],
+    "camera_high": [1, -1],
 }, index=["製品A", "製品B"])
 
 result.market_share(products)
@@ -157,10 +161,11 @@ result.plot_wtp(price_unit="万円")  # WTPの棒グラフ
 | カテゴリ | 重大度 | 内容 |
 |----------|:------:|------|
 | `r2_low` | 大 | R² < 0.20（説明力が低い） |
-| `few_respondents` | 大/中 | 回答者数が少ない（5人未満） |
-| `price_sign_negative` | 中 | 価格係数の符号が逆（符号化ミスの疑い） |
+| `obs_per_predictor` | 大/中 | 観測数／説明変数数の比率が低い（< 5 → 大、< 10 → 中） |
+| `few_respondents` | 大/中 | 回答者数が少ない（1人→大、2〜4人→中） |
+| `price_sign_negative` | 中 | 価格係数の符号が逆かつ有意（符号化ミスの疑い） |
 | `price_insignificant` | 中 | 価格係数の p 値 ≥ 0.10（WTP の信頼性低下） |
-| `wtp_extrapolation` | 大/中 | \|WTP\| > 価格レンジ × 2（外挿値） |
+| `wtp_extrapolation` | 中 | \|WTP\| > 価格レンジ × 2（外挿値） |
 
 ```python
 result.warnings()                        # すべての警告

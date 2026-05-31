@@ -15,10 +15,8 @@ analysis.py
 """
 from __future__ import annotations
 
-import re
-import warnings
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Sequence, Tuple, Union
+from typing import Dict, List, Optional, Union
 
 import numpy as np
 import pandas as pd
@@ -131,9 +129,10 @@ def fit(
     * 価格係数が負（＝価格が上がるほど評点が高い）の場合：
       データ品質または符号化方向の誤りを示唆。
 
-    * R² が極端に低い（< 0.1）場合：仮定の妥当性に疑問。
+    * R² が極端に低い（< 0.20）場合：仮定の妥当性に疑問。
 
-    * 回答者が1人しかいない場合：個人の好みを集団の傾向と誤解する危険。
+    * 回答者が1人の場合（重大度：大）または2〜4人の場合（重大度：中）：
+      個人・少数の好みを集団の傾向と誤解する危険。
     """
     # ---------- 入力チェック ----------
     if rating not in df.columns:
@@ -204,7 +203,7 @@ def fit(
         res = _rename_result_index(res, rev_map)
 
     result = ConjointResult(
-        model_result=res,
+        ols=res,
         df=df,
         rating=rating,
         encoded_columns=list(encoded_columns),
@@ -234,9 +233,9 @@ class ConjointResult:
 
     Attributes
     ----------
-    model_result : statsmodels.regression.linear_model.RegressionResults
+    ols : statsmodels.regression.linear_model.RegressionResults
         statsmodels の元の結果オブジェクト。
-        詳細な統計量を見たい場合は ``result.model_result.summary()`` で取得可能。
+        詳細な統計量を見たい場合は ``result.ols.summary()`` で取得可能。
 
     df : pd.DataFrame
         分析に使ったデータ。
@@ -260,7 +259,7 @@ class ConjointResult:
         日本語列名等を内部用エイリアスにリネームしたマップ。
         ``predict`` を呼ぶときに ``products`` をこのマップで変換する。
     """
-    model_result: RegressionResults
+    ols: RegressionResults
     df: pd.DataFrame
     rating: str
     encoded_columns: List[str]
@@ -278,17 +277,17 @@ class ConjointResult:
     @property
     def params(self) -> pd.Series:
         """推定された係数（切片含む）。``result.params`` で取得可能。"""
-        return self.model_result.params
+        return self.ols.params
 
     @property
     def rsquared(self) -> float:
         """決定係数 R²。"""
-        return float(self.model_result.rsquared)
+        return float(self.ols.rsquared)
 
     @property
     def n_obs(self) -> int:
         """分析に使った観測数。"""
-        return int(self.model_result.nobs)
+        return int(self.ols.nobs)
 
     @property
     def intercept(self) -> float:
@@ -304,41 +303,59 @@ class ConjointResult:
         Parameters
         ----------
         slim : bool, default True
-            ``True`` でコンパクトな統計表を表示。
+            ``True`` でコンパクトな和文サマリーを表示。
+            ``False`` で statsmodels の詳細な統計表（英語）を表示。
 
         Returns
         -------
         str
-            人間が読みやすい和文サマリー。
+            人間が読みやすい和文サマリー（slim=True）または
+            statsmodels の詳細な統計表（slim=False）。
 
         Examples
         --------
         >>> print(result.summary())
+        >>> print(result.summary(slim=False))  # statsmodels 詳細表示
         """
+        if not slim:
+            return str(self.ols.summary())
+
         lines: List[str] = []
         lines.append("=" * 60)
         lines.append("コンジョイント分析の結果（和文サマリー）")
         lines.append("=" * 60)
-        lines.append(f"観測数         : {self.n_obs}")
-        lines.append(f"説明変数の数   : {len(self.encoded_columns)}")
-        lines.append(f"決定係数 R²    : {self.rsquared:.4f}")
-        lines.append(f"自由度修正 R²  : {self.model_result.rsquared_adj:.4f}")
+        stat_rows = [
+            ("観測数",       str(self.n_obs)),
+            ("説明変数の数", str(len(self.encoded_columns))),
+            ("決定係数 R²",  f"{self.rsquared:.4f}"),
+            ("自由度修正 R²", f"{self.ols.rsquared_adj:.4f}"),
+        ]
         if self.n_dropped > 0:
-            lines.append(f"欠損で除外     : {self.n_dropped} 行")
+            stat_rows.append(("欠損で除外", f"{self.n_dropped} 行"))
+        max_label_w = max(_display_width(lbl) for lbl, _ in stat_rows)
+        for label, value in stat_rows:
+            lines.append(f"{_ljust_display(label, max_label_w + 1)}: {value}")
         lines.append("")
 
         # 係数表
         NAME_WIDTH = 25
+        STAR_WIDTH = 6  # 「有意性」の表示幅（3文字×2）
         lines.append("【推定された係数（部分効用 part-worth）】")
         params = self.params
-        pvals = self.model_result.pvalues
-        lines.append(f"  {'Variable':<{NAME_WIDTH}} {'Coef':>10} {'p-value':>10} {'Sig':>5}")
-        lines.append(f"  {'-' * NAME_WIDTH} {'-' * 10} {'-' * 10} {'-' * 5}")
+        pvals = self.ols.pvalues
+        lines.append(
+            "  "
+            + _ljust_display("変数", NAME_WIDTH)
+            + " " + _rjust_display("係数", 10)
+            + " " + _rjust_display("p値", 10)
+            + "  " + "有意性"
+        )
+        lines.append(f"  {'-' * NAME_WIDTH} {'-' * 10} {'-' * 10}  {'-' * STAR_WIDTH}")
         for name in params.index:
             coef = params[name]
             p = pvals[name]
             star = _significance_stars(p)
-            lines.append(f"  {name:<{NAME_WIDTH}} {coef:>10.4f} {p:>10.4f} {star:>5}")
+            lines.append(f"  {name:<{NAME_WIDTH}} {coef:>10.4f} {p:>10.4f}  {star}")
         lines.append("")
         lines.append("  有意水準: *** p<0.001  ** p<0.01  * p<0.05  . p<0.1")
 
@@ -364,6 +381,84 @@ class ConjointResult:
 
     def __repr__(self) -> str:  # pragma: no cover
         return self.summary()
+
+    def _repr_html_(self) -> str:
+        """Jupyter Notebook 向け HTML 表示。
+        セルで ``result`` とだけ入力したときに自動的に使われる。
+        ``print(result.summary())`` は従来どおりテキスト表示。
+        """
+        from html import escape
+
+        _td = "padding:3px 14px 3px 4px;"
+        _th = _td + "border-bottom:1px solid #888;font-weight:bold;"
+        _tbl = "border-collapse:collapse;margin-bottom:0.8em;"
+
+        def td(txt, align="left"):
+            return f'<td style="{_td}text-align:{align};">{escape(str(txt))}</td>'
+
+        def th(txt, align="left"):
+            return f'<th style="{_th}text-align:{align};">{escape(str(txt))}</th>'
+
+        p = ['<div>',
+             '<p><strong>コンジョイント分析の結果</strong></p>']
+
+        # 統計量
+        stat_rows = [
+            ("観測数",       str(self.n_obs)),
+            ("説明変数の数", str(len(self.encoded_columns))),
+            ("決定係数 R²",  f"{self.rsquared:.4f}"),
+            ("自由度修正 R²", f"{self.ols.rsquared_adj:.4f}"),
+        ]
+        if self.n_dropped > 0:
+            stat_rows.append(("欠損で除外", f"{self.n_dropped} 行"))
+
+        p.append(f'<table style="{_tbl}">')
+        for lbl, val in stat_rows:
+            p.append(f'<tr>{td(lbl)}{td(val)}</tr>')
+        p.append('</table>')
+
+        # 係数テーブル
+        p.append('<p><strong>【推定された係数（部分効用 part-worth）】</strong></p>')
+        p.append(f'<table style="{_tbl}">')
+        p.append('<tr>'
+                 + th("変数") + th("係数", "right")
+                 + th("p値", "right") + th("有意性", "right")
+                 + '</tr>')
+
+        params = self.params
+        pvals  = self.ols.pvalues
+        for name in params.index:
+            c    = params[name]
+            pv   = pvals[name]
+            star = _significance_stars(pv)
+            p.append('<tr>'
+                     + td(name) + td(f"{c:.4f}", "right")
+                     + td(f"{pv:.4f}", "right") + td(star, "right")
+                     + '</tr>')
+        p.append('</table>')
+        p.append('<p style="font-size:0.85em;color:#888;">'
+                 '有意水準: *** p&lt;0.001&nbsp; ** p&lt;0.01&nbsp;'
+                 ' * p&lt;0.05&nbsp; . p&lt;0.1</p>')
+
+        # 重大警告
+        major = [d for d in self._diagnostics if d.severity == "大"]
+        minor = [d for d in self._diagnostics if d.severity != "大"]
+        if major:
+            p.append('<p><strong>⚠️ 重大な注意事項</strong></p><ul>')
+            for d in major:
+                p.append(f'<li><strong>[{escape(d.severity)}]</strong> '
+                         f'{escape(d.message)}<br>'
+                         f'&nbsp;&nbsp;→ {escape(d.recommendation)}</li>')
+            p.append('</ul>')
+        if minor:
+            p.append(
+                f'<p style="font-size:0.9em;color:#888;">'
+                f'その他の注意事項が {len(minor)} 件あります。'
+                f'result.warnings() で確認できます。</p>'
+            )
+
+        p.append('</div>')
+        return '\n'.join(p)
 
     # ---- 警告（落とし穴）の取得 -------------------------------------------
 
@@ -509,11 +604,11 @@ class ConjointResult:
 
         .. code-block:: python
 
-            unit_rating_man = -(low_price - high_price) / b_price
-            wtp = unit_rating_man * b_attr
+            wtp_price_factor = -(low_price - high_price) / b_price
+            wtp = wtp_price_factor * b_attr
 
         を一般化したもの。``low_price - high_price`` は負の値なので、
-        マイナスを付けて「評点1ポイント＝何万円か」を出す。
+        マイナスを付けて正のスケール係数にする。
 
         Parameters
         ----------
@@ -523,7 +618,7 @@ class ConjointResult:
         Returns
         -------
         pd.DataFrame
-            列：``coef`` （係数）, ``wtp`` （支払意思額、価格と同じ単位）。
+            列：``係数``, ``支払意思額``（価格と同じ単位）。
             インデックスは非価格属性の符号化列名。
 
         Raises
@@ -561,7 +656,7 @@ class ConjointResult:
 
         price_enc_col = price_encoded[0]
         b_price = float(self.params[price_enc_col])
-        p_price = float(self.model_result.pvalues[price_enc_col])
+        p_price = float(self.ols.pvalues[price_enc_col])
 
         # 価格の元の水準を取得
         price_levels = sorted(self.df[price_col].dropna().unique().tolist())
@@ -594,16 +689,19 @@ class ConjointResult:
             )
         price_is_significant = p_price < 0.10
 
-        # 評点1点あたりの金額
-        unit_rating_money = -(low_price - high_price) / b_price
+        # WTP計算のスケール係数: price_range / b_price
+        # WTP_attr = wtp_price_factor * b_attr として使う。
+        # ※「評点1点の金額」は unit_rating_money() = price_range / (2*b_price) であり、
+        #   こちらはその2倍（効果コーディングで属性変化時の効用差が 2*b_attr になるため）。
+        wtp_price_factor = -(low_price - high_price) / b_price
 
         rows = []
         for col in self.encoded_columns:
             if col == price_enc_col:
                 continue
             b = float(self.params[col])
-            wtp_value = unit_rating_money * b
-            rows.append({"variable": col, "coef": b, "wtp": wtp_value})
+            wtp_value = wtp_price_factor * b
+            rows.append({"variable": col, "係数": b, "支払意思額": wtp_value})
 
         out = pd.DataFrame(rows).set_index("variable")
         out.index.name = "属性（符号化列名）"
@@ -612,11 +710,11 @@ class ConjointResult:
         # 価格係数が有意でない場合は「大」、有意な場合は「中」
         for _, row in out.iterrows():
             attr_col = row.name
-            wtp_val = float(row["wtp"])
+            wtp_val = float(row["支払意思額"])
             threshold = price_range * 2
             cat_key = f"wtp_extrapolation_{attr_col}"
             if abs(wtp_val) > threshold and cat_key not in already_cats:
-                sev = "大" if not price_is_significant else "中"
+                sev = "中"
                 self._diagnostics.append(
                     Diagnostic(
                         severity=sev,
@@ -638,7 +736,7 @@ class ConjointResult:
 
         # 補足情報を attrs に保持（テストや plot_wtp で使える）
         out.attrs["price_col"] = price_col
-        out.attrs["unit_rating_money"] = unit_rating_money
+        out.attrs["wtp_price_factor"] = wtp_price_factor
         out.attrs["price_low"] = low_price
         out.attrs["price_high"] = high_price
         out.attrs["price_range"] = price_range
@@ -734,7 +832,7 @@ class ConjointResult:
             products_for_predict = products
 
         # 効用予測
-        u = self.model_result.predict(products_for_predict)
+        u = self.ols.predict(products_for_predict)
 
         if method in ("logit", "share_of_preference"):
             # 数値安定化のため最大値を引く（softmax）
@@ -809,7 +907,7 @@ class ConjointResult:
     def _find_encoded_for(self, original_col: str) -> Optional[List[str]]:
         """
         元の属性列名に対応する符号化列を見つける。
-        ``encode()`` の命名規則 ``{original}_{level}`` に基づく。
+        ``encode()`` の命名規則 ``{original}_{インデックス}`` に基づく。
         """
         prefix = f"{original_col}_"
         cols = [c for c in self.encoded_columns if c.startswith(prefix)]
@@ -822,28 +920,33 @@ class ConjointResult:
         検出される警告
         ---------------
         1. **price_sign_negative**（重大度：中）
-           価格係数の符号が負（価格が低い水準で評点が低い）。
+           価格係数が負かつ有意（p < 0.10）。符号化方向のミスを示唆。
+           有意でない場合は符号がノイズで決まるため発火しない。
 
         2. **r2_low**（重大度：大）
            R² < 0.20。線形仮定の妥当性に大きな疑問。
 
-        3. **few_respondents**（重大度：大 or 中）
-           回答者が1人なら「大」、5人未満なら「中」。
+        3. **obs_per_predictor**（重大度：大 or 中）
+           観測数／説明変数数の比率が低い。
+           比率 < 5 で「大」、< 10 で「中」。
 
-        4. **price_insignificant**（重大度：中、:meth:`wtp` 呼出時）
+        4. **few_respondents**（重大度：大 or 中）
+           回答者が1人なら「大」、2〜4人なら「中」。
+
+        5. **price_insignificant**（重大度：中、:meth:`wtp` 呼出時）
            価格係数の p値 ≥ 0.10。WTP計算の分母が不確実。
 
-        5. **wtp_extrapolation**（重大度：大 or 中、:meth:`wtp` 呼出時）
+        6. **wtp_extrapolation**（重大度：中、:meth:`wtp` 呼出時）
            ``|WTP| > 価格レンジ × 2``。観測範囲外への外挿。
-           価格係数が有意でない場合は「大」、有意な場合は「中」。
         """
-        # 1) 価格係数の符号
+        # 1) 価格係数の符号（有意な場合のみ）
         if self.price_col in self.df.columns:
             price_cols = self._find_encoded_for(self.price_col)
             if price_cols and len(price_cols) == 1:
                 b_price = float(self.params[price_cols[0]])
-                # 符号化規則：価格の高い方が基準（-1）→ 通常 b > 0
-                if b_price < 0:
+                p_price_diag = float(self.ols.pvalues[price_cols[0]])
+                # 有意でない場合は符号がノイズで決まるため偽陽性になりうる
+                if b_price < 0 and p_price_diag < 0.10:
                     self._diagnostics.append(
                         Diagnostic(
                             severity="中",
@@ -876,7 +979,42 @@ class ConjointResult:
                 )
             )
 
-        # 3) 回答者数の確認
+        # 3) 観測数／説明変数比のチェック
+        n_vars = len(self.encoded_columns)
+        if n_vars > 0:
+            ratio = self.n_obs / n_vars
+            if ratio < 5:
+                self._diagnostics.append(
+                    Diagnostic(
+                        severity="大",
+                        category="obs_per_predictor",
+                        message=(
+                            f"観測数（{self.n_obs}）が説明変数数（{n_vars}）の"
+                            f"{ratio:.1f}倍しかなく、推定が非常に不安定です。"
+                        ),
+                        recommendation=(
+                            "回答者を増やしてください。"
+                            "目安として観測数は説明変数数の10倍以上が望ましいです。"
+                        ),
+                    )
+                )
+            elif ratio < 10:
+                self._diagnostics.append(
+                    Diagnostic(
+                        severity="中",
+                        category="obs_per_predictor",
+                        message=(
+                            f"観測数（{self.n_obs}）が説明変数数（{n_vars}）の"
+                            f"{ratio:.1f}倍で、やや少なめです。"
+                        ),
+                        recommendation=(
+                            "可能なら回答者を増やしてください。"
+                            "目安として観測数は説明変数数の10倍以上が望ましいです。"
+                        ),
+                    )
+                )
+
+        # 4) 回答者数の確認
         if "回答者ID" in self.df.columns:
             n_resp = int(self.df["回答者ID"].nunique())
             if n_resp == 1:
@@ -915,15 +1053,6 @@ class ConjointResult:
 # 内部ヘルパー
 # ---------------------------------------------------------------------------
 
-def _safe_var(name: str) -> str:
-    """
-    statsmodels の formula 用に変数名をエスケープする。
-    日本語列名のような場合は backtick で囲む。
-    """
-    if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
-        return name
-    return f"Q('{name}')"
-
 
 def _rename_result_index(res: RegressionResults, rev_map: Dict[str, str]) -> RegressionResults:
     """
@@ -960,7 +1089,6 @@ def _rename_result_index(res: RegressionResults, rev_map: Dict[str, str]) -> Reg
     return res
 
 
-
 def _significance_stars(p: float) -> str:
     if p < 0.001:
         return "***"
@@ -971,6 +1099,25 @@ def _significance_stars(p: float) -> str:
     if p < 0.1:
         return "."
     return ""
+
+
+def _display_width(s: str) -> int:
+    """Wide(W)・Fullwidth(F) を2列、それ以外を1列として扱う。"""
+    import unicodedata
+    return sum(
+        2 if unicodedata.east_asian_width(c) in ("W", "F") else 1
+        for c in s
+    )
+
+
+def _ljust_display(s: str, width: int) -> str:
+    """表示幅ベースで左寄せパディングする。"""
+    return s + " " * max(0, width - _display_width(s))
+
+
+def _rjust_display(s: str, width: int) -> str:
+    """表示幅ベースで右寄せパディングする。"""
+    return " " * max(0, width - _display_width(s)) + s
 
 
 def _detect_encoded_columns(
@@ -1015,7 +1162,7 @@ def _group_columns_by_attribute(
 ) -> Dict[str, List[str]]:
     """
     符号化列を元の属性名でグルーピングする。
-    ``{属性名}_{水準名}`` という命名規則を前提にする。
+    ``{属性名}_{インデックス}`` という命名規則を前提にする。
 
     既知の属性リストがあればそれで前方一致を試み、
     なければ ``_`` で分割した先頭部分を属性名とみなす。
@@ -1024,7 +1171,6 @@ def _group_columns_by_attribute(
     if known_attrs:
         # 長い名前から優先（部分一致を防ぐ）
         sorted_attrs = sorted(known_attrs, key=len, reverse=True)
-        used = set()
         for c in encoded_columns:
             matched = None
             for a in sorted_attrs:
@@ -1035,7 +1181,6 @@ def _group_columns_by_attribute(
                 # 既知に一致しない場合は最初の "_" で分割
                 matched = c.split("_")[0]
             groups.setdefault(matched, []).append(c)
-            used.add(c)
         return groups
 
     # 既知属性がない場合

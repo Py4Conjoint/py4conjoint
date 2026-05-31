@@ -20,7 +20,7 @@ py4conjoint
     import pandas as pd
     import py4conjoint as pc
 
-    # ---- 1. アンケートのカード設計 ----
+    # ---- 1. アンケートのプロファイル設計 ----
     cards = pd.DataFrame({
         "price":  [6, 10, 6, 10],
         "os":     ["android", "apple", "apple", "android"],
@@ -30,7 +30,7 @@ py4conjoint
     # ---- 2. Forms 回答ファイルを分析用データに変換 ----
     df = pc.forms_to_conjoint_data(
         responses_file="responses.xlsx",
-        n_cards=4,
+        n_profiles=4,
         attributes=cards,
     )
 
@@ -71,7 +71,7 @@ from .analysis import fit, ConjointResult
 from .plot import plot_importance, plot_partworth, plot_wtp
 
 
-__version__ = "0.2.0"
+__version__ = "0.2.2"
 
 __all__ = [
     # データ作成

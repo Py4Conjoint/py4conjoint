@@ -24,15 +24,15 @@ import pandas as pd
 
 def forms_to_conjoint_data(
     responses_file: str,
-    n_cards: int,
-    attributes: "pd.DataFrame | Sequence[Dict[str, Sequence]]",
+    attributes: "pd.DataFrame | Dict[str, Sequence]",
     *,
+    n_profiles: Optional[int] = None,
     forms: Literal["microsoft", "google"] = "microsoft",
     respondent_cols: Optional[Dict[str, str]] = None,
-    card_id_prefix: str = "P",
+    profile_id_prefix: str = "P",
     rating_colname: str = "rating",
     respondent_id_colname: str = "回答者ID",
-    card_id_colname: str = "カードID",
+    profile_id_colname: str = "プロファイルID",
     out_csv: Optional[str] = None,
 ) -> pd.DataFrame:
     """
@@ -44,39 +44,39 @@ def forms_to_conjoint_data(
         Forms からダウンロードした回答ファイルのパス。
         Microsoft Forms の場合は .xlsx、Google Forms の場合は .csv。
 
-    n_cards : int
-        アンケートで提示したカード（プロファイル）の枚数。
-        例：4
-
-    attributes : pd.DataFrame または list of dict
-        カード設計を指定する。以下の2形式を受け付ける。
+    attributes : pd.DataFrame または dict
+        プロファイル設計を指定する。以下の2形式を受け付ける。
 
         【形式A：DataFrameをそのまま渡す（推奨）】
-            授業で作成した cards をそのまま渡すことができる。
-            行がカード、列が属性に対応する。
+            授業で作成した profiles をそのまま渡すことができる。
+            行がプロファイル、列が属性に対応する。
             インデックスは ["P1","P2",...] でも整数でも可。
 
             例：
-            cards = pd.DataFrame([
-                {"price": 6,  "os": "android", "camera": "standard"},
-                {"price": 10, "os": "apple",   "camera": "standard"},
-                {"price": 6,  "os": "apple",   "camera": "high"},
-                {"price": 10, "os": "android", "camera": "high"},
-            ], index=["P1", "P2", "P3", "P4"])
+            profiles = pd.DataFrame({
+                "price":  [6, 10, 6, 10],
+                "os":     ["android", "apple", "apple", "android"],
+                "camera": ["標準", "標準", "高性能", "高性能"],
+            }, index=["P1", "P2", "P3", "P4"])
 
-            df = pc.forms_to_conjoint_data(..., attributes=cards)
+            df = pc.forms_to_conjoint_data(responses_file, profiles)
 
-        【形式B：辞書のリスト（従来形式）】
-            各属性を1辞書で指定する。辞書のキーが属性名、値がカード順の水準リスト。
+        【形式B：辞書】
+            属性名をキー、プロファイル順の水準リストを値とする辞書。
 
             例：
-            [
-                {"price":   [6, 10, 6, 10]},
-                {"os":      ["android", "apple", "apple", "android"]},
-                {"camera":  ["standard", "standard", "high", "high"]},
-            ]
+            profiles = {
+                "price":  [6, 10, 6, 10],
+                "os":     ["android", "apple", "apple", "android"],
+                "camera": ["標準", "標準", "高性能", "高性能"],
+            }
 
-        いずれの形式でも、行数（または水準リストの長さ）は n_cards と一致する必要がある。
+            df = pc.forms_to_conjoint_data(responses_file, profiles)
+
+    n_profiles : int, optional
+        アンケートで提示したプロファイルの枚数。
+        省略時は attributes の水準リストの長さから自動推測する。
+        例：4
 
     forms : {"microsoft", "google"}, default "microsoft"
         使用するFormsの種類を指定する。
@@ -89,7 +89,7 @@ def forms_to_conjoint_data(
         例：{"性別": "gender", "学年": "year"}
         省略した場合は回答者属性を付与しない。
 
-    card_id_prefix : str, default "P"
+    profile_id_prefix : str, default "P"
         プロファイルIDの接頭辞。"P" なら P1, P2, P3, P4 となる。
 
     rating_colname : str, default "rating"
@@ -98,8 +98,8 @@ def forms_to_conjoint_data(
     respondent_id_colname : str, default "回答者ID"
         出力DataFrameの回答者ID列名。
 
-    card_id_colname : str, default "カードID"
-        出力DataFrameの列名。
+    profile_id_colname : str, default "プロファイルID"
+        出力DataFrameのプロファイルID列名。
 
     out_csv : str, optional
         変換後のDataFrameをCSVとして保存するパス。
@@ -109,7 +109,7 @@ def forms_to_conjoint_data(
     -------
     pd.DataFrame
         long形式のDataFrame。
-        列：回答者ID, カードID, rating, [回答者属性], [カード属性]
+        列：回答者ID, プロファイルID, rating, [回答者属性], [プロファイル属性]
 
     Raises
     ------
@@ -117,21 +117,24 @@ def forms_to_conjoint_data(
         responses_file が存在しない場合。
     ValueError
         forms が "microsoft" または "google" 以外の場合。
-        attributes の行数（または水準リストの長さ）が n_cards と一致しない場合。
-        評点列が n_cards 列分見つからない場合。
+        属性の水準リストの長さが揃っていない場合。
+        評点列が推測されたプロファイル数分見つからない場合。
     """
 
     # ------------------------------------------------------------------
     # 0. 入力チェック
     # ------------------------------------------------------------------
+    if n_profiles is None:
+        n_profiles = _infer_n_profiles(attributes)
+
     if forms not in ("microsoft", "google"):
         raise ValueError(
             f"forms='{forms}' は無効な値です。\n"
             "'microsoft' または 'google' を指定してください。"
         )
 
-    attributes = _normalize_attributes(attributes, n_cards)
-    _check_attributes(attributes, n_cards)
+    attributes = _normalize_attributes(attributes, n_profiles)
+    _check_attributes(attributes, n_profiles)
 
     csv_path = Path(responses_file)
     if not csv_path.exists():
@@ -175,7 +178,7 @@ def forms_to_conjoint_data(
     non_rating_cols = set(system_cols) | set(respondent_src_cols)
     rating_candidate_cols = [c for c in raw.columns if c not in non_rating_cols]
 
-    rating_cols = _pick_rating_cols(rating_candidate_cols, raw, n_cards, responses_file)
+    rating_cols = _pick_rating_cols(rating_candidate_cols, raw, n_profiles, responses_file)
 
     # ------------------------------------------------------------------
     # 3. 回答者IDを付与
@@ -195,8 +198,8 @@ def forms_to_conjoint_data(
         respondent_dst_cols = []
 
     # 評点列をプロファイルID（文字列）にリネームして wide→long 変換しやすくする
-    card_ids = [f"{card_id_prefix}{i+1}" for i in range(n_cards)]
-    rating_rename = dict(zip(rating_cols, card_ids))
+    profile_ids = [f"{profile_id_prefix}{i+1}" for i in range(n_profiles)]
+    rating_rename = dict(zip(rating_cols, profile_ids))
     df_wide = df_wide.rename(columns=rating_rename)
 
     # ------------------------------------------------------------------
@@ -205,25 +208,25 @@ def forms_to_conjoint_data(
     id_vars = [respondent_id_colname] + respondent_dst_cols
     df_long = df_wide.melt(
         id_vars=id_vars,
-        value_vars=card_ids,
-        var_name=card_id_colname,
+        value_vars=profile_ids,
+        var_name=profile_id_colname,
         value_name=rating_colname,
     )
-    df_long = df_long.sort_values([respondent_id_colname, card_id_colname])
+    df_long = df_long.sort_values([respondent_id_colname, profile_id_colname])
     df_long = df_long.reset_index(drop=True)
 
     # ------------------------------------------------------------------
-    # 6. カード設計（属性・水準）をマージ
+    # 6. プロファイル設計（属性・水準）をマージ
     # ------------------------------------------------------------------
-    card_design = _build_card_design(card_ids, attributes, card_id_colname)
-    df_long = df_long.merge(card_design, on=card_id_colname)
+    profile_design = _build_profile_design(profile_ids, attributes, profile_id_colname)
+    df_long = df_long.merge(profile_design, on=profile_id_colname)
 
     # ------------------------------------------------------------------
-    # 7. 列順を整理：回答者ID, カードID, rating, 回答者属性, カード属性
+    # 7. 列順を整理：回答者ID, プロファイルID, rating, 回答者属性, プロファイル属性
     # ------------------------------------------------------------------
     attr_names = [list(a.keys())[0] for a in attributes]
     col_order = (
-        [respondent_id_colname, card_id_colname, rating_colname]
+        [respondent_id_colname, profile_id_colname, rating_colname]
         + respondent_dst_cols
         + attr_names
     )
@@ -332,15 +335,15 @@ def _detect_system_cols(df: pd.DataFrame, patterns: List[str]) -> List[str]:
 def _pick_rating_cols(
     candidates: List[str],
     df: pd.DataFrame,
-    n_cards: int,
+    n_profiles: int,
     csv_path: str,
 ) -> List[str]:
     """
-    評点列を candidates から n_cards 列分選ぶ。
+    評点列を candidates から n_profiles 列分選ぶ。
 
     優先順位：
-    1. 候補列の中で数値型の列が n_cards 個ある → それを採用
-    2. 候補列の右端 n_cards 列を採用（数値変換できるか確認）
+    1. 候補列の中で数値型の列が n_profiles 個ある → それを採用
+    2. 候補列の右端 n_profiles 列を採用（数値変換できるか確認）
     3. 上記でも取得できなければ ValueError
     """
     numeric_candidates = [
@@ -349,11 +352,11 @@ def _pick_rating_cols(
         or _is_coercible_to_numeric(df[c])
     ]
 
-    if len(numeric_candidates) >= n_cards:
-        return numeric_candidates[-n_cards:]
+    if len(numeric_candidates) >= n_profiles:
+        return numeric_candidates[-n_profiles:]
 
-    if len(candidates) >= n_cards:
-        selected = candidates[-n_cards:]
+    if len(candidates) >= n_profiles:
+        selected = candidates[-n_profiles:]
         for col in selected:
             if not _is_coercible_to_numeric(df[col]):
                 raise ValueError(
@@ -364,9 +367,9 @@ def _pick_rating_cols(
         return selected
 
     raise ValueError(
-        f"評点列が {n_cards} 列分見つかりませんでした。\n"
+        f"評点列が {n_profiles} 列分見つかりませんでした。\n"
         f"評点列の候補: {candidates}\n"
-        f"n_cards={n_cards} に対して候補が {len(candidates)} 列しかありません。\n"
+        f"n_profiles={n_profiles} に対して候補が {len(candidates)} 列しかありません。\n"
         f"ファイルの列構造を確認してください: {csv_path}"
     )
 
@@ -377,49 +380,69 @@ def _is_coercible_to_numeric(series: pd.Series) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# 内部ヘルパー関数：カード設計・属性の処理
+# 内部ヘルパー関数：プロファイル設計・属性の処理
 # ---------------------------------------------------------------------------
 
-def _build_card_design(
-    card_ids: List[str],
+def _build_profile_design(
+    profile_ids: List[str],
     attributes: Sequence[Dict[str, Sequence]],
-    card_id_colname: str,
+    profile_id_colname: str,
 ) -> pd.DataFrame:
-    """カードID と属性・水準の対応テーブルを作成する。"""
-    data: Dict[str, list] = {card_id_colname: card_ids}
+    """プロファイルID と属性・水準の対応テーブルを作成する。"""
+    data: Dict[str, list] = {profile_id_colname: profile_ids}
     for attr_dict in attributes:
         attr_name, levels = list(attr_dict.items())[0]
         data[attr_name] = list(levels)
     return pd.DataFrame(data)
 
 
+def _infer_n_profiles(
+    attributes: "pd.DataFrame | Dict[str, Sequence]",
+) -> int:
+    """attributes の水準リスト長からプロファイル数を推測する。"""
+    if isinstance(attributes, pd.DataFrame):
+        return len(attributes)
+    if isinstance(attributes, dict):
+        if not attributes:
+            raise ValueError("attributes が空です。少なくとも1つの属性を指定してください。")
+        return len(next(iter(attributes.values())))
+    raise TypeError(
+        f"attributes は pd.DataFrame または dict を指定してください。\n"
+        f"  受け取った型: {type(attributes).__name__}"
+    )
+
+
 def _normalize_attributes(
-    attributes: "pd.DataFrame | Sequence[Dict[str, Sequence]]",
-    n_cards: int,
+    attributes: "pd.DataFrame | Dict[str, Sequence]",
+    n_profiles: int,
 ) -> "List[Dict[str, list]]":
     """
     attributes を内部処理用の「辞書のリスト」形式に統一する。
 
-    - pd.DataFrame が渡された場合：列ごとに {列名: 値リスト} の辞書に変換する
-    - 辞書のリストが渡された場合：そのまま返す
+    - pd.DataFrame → 列ごとに {列名: 値リスト} の辞書に変換する
+    - dict → [{属性名: 値リスト}, ...] に変換する
     """
     if isinstance(attributes, pd.DataFrame):
-        if len(attributes) != n_cards:
+        if len(attributes) != n_profiles:
             raise ValueError(
-                f"cards（attributes）の行数 ({len(attributes)}) が "
-                f"n_cards ({n_cards}) と一致しません。\n"
-                f"cards の行数と n_cards を同じ値にしてください。"
+                f"attributes の行数 ({len(attributes)}) が "
+                f"n_profiles ({n_profiles}) と一致しません。"
             )
         return [
             {col: list(attributes[col])}
             for col in attributes.columns
         ]
-    return list(attributes)
+    if isinstance(attributes, dict):
+        return [{k: list(v)} for k, v in attributes.items()]
+    raise TypeError(
+        f"attributes は pd.DataFrame または dict を指定してください。\n"
+        f"  受け取った型: {type(attributes).__name__}"
+    )
 
 
 def _check_attributes(
     attributes: "List[Dict[str, list]]",
-    n_cards: int,
+    n_profiles: int,
 ) -> None:
     """attributes の構造と水準数を検証する。"""
     if not attributes:
@@ -444,9 +467,9 @@ def _check_attributes(
                 f"実際の値：{attr_dict}"
             )
         attr_name, levels = list(attr_dict.items())[0]
-        if len(levels) != n_cards:
+        if len(levels) != n_profiles:
             raise ValueError(
                 f"属性 '{attr_name}' の水準リストの長さ ({len(levels)}) が "
-                f"n_cards ({n_cards}) と一致しません。\n"
+                f"n_profiles ({n_profiles}) と一致しません。\n"
                 f"水準リスト: {list(levels)}"
             )

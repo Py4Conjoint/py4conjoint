@@ -4,6 +4,51 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [0.2.2] - 2026-05-31
+
+### Changed
+- 「カード」→「プロファイル」に全面統一
+  - `card_id_prefix` → `profile_id_prefix`、`card_id_colname` → `profile_id_colname`、
+    `n_cards` → `n_profiles`、内部関数 `_build_card_design` → `_build_profile_design` など
+- `model_result` 属性を `ols` に改名
+- `encode()` の `respondent_encode` で `[zero_level, suffix]` リスト形式をサポート
+- `result.wtp()` の列名を日本語化（`coef` → `係数`、`wtp` → `支払意思額`）
+- `result` をセルに入力したときの Jupyter Notebook 表示を HTML（`_repr_html_()`）に変更
+  （有意性列が右揃えになり、見やすく）
+
+### Fixed
+- `warnings()` の改善
+  - `price_sign_negative`：p 値 ≥ 0.10 の場合は符号がノイズ起因のため発火しないよう修正
+  - `wtp_extrapolation`：重大度を常に「中」に統一（`price_insignificant` と重複するため）
+  - `obs_per_predictor` 警告を新規追加（観測数／説明変数数 < 5 → 大、< 10 → 中）
+- `plot_wtp()` が `wtp()` の列名変更（`"wtp"` → `"支払意思額"`）に追従できていなかった
+  バグを修正（`KeyError: 'wtp'` が発生していた）
+
+### Added
+- `examples/overview_os.ipynb`：全公開APIを実データ（`responses_os.csv`）で動作確認するノートブック
+
+---
+
+## [0.2.1] - 2026-05-30
+
+### Fixed
+- `summary(slim=False)` が未実装だった問題を修正（statsmodels の詳細統計表を返すように）
+- `fit()` および `_run_diagnostics()` のドキュメントで `few_respondents` の重大度説明が不正確だった点を修正
+  （「5人未満→大」→「1人→大、2〜4人→中、5人以上は警告なし」）
+- README の係数名・サマリー出力例を現行の列名形式（`price_0`, `os_0`, `camera_0`）に統一
+
+### Changed
+- `examples/overview.ipynb` を全公開APIを網羅する単一ノートブックに統合
+
+### Tests
+- `test_diagnostics_price_insignificant` を確定的な直交バランスデザインに変更
+- `test_few_respondents_major/minor/no_warning`, `test_price_sign_negative`,
+  `test_summary_slim_false`, `test_auto_reference_levels`, `test_market_share_max`,
+  `test_encode_drop_original`, `test_encode_inplace`, `test_encode_binary_suffix_map`,
+  `test_importance_ratio`, `test_wtp_attrs` を追加（計12テスト追加）
+
+---
+
 ## [0.2.0] - 2026-05-17
 
 ### Added

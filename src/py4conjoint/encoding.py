@@ -24,7 +24,7 @@ encoding.py
 from __future__ import annotations
 
 import warnings
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 import pandas as pd
 
@@ -37,6 +37,7 @@ def encode(
     df: pd.DataFrame,
     reference_levels: Dict[str, object],
     *,
+    respondent_encode: Optional[Dict[str, object]] = None,
     binary_suffix_map: Optional[Dict[str, str]] = None,
     drop_original: bool = False,
     inplace: bool = False,
@@ -52,7 +53,7 @@ def encode(
     ----------
     df : pd.DataFrame
         ``forms_to_conjoint_data`` の出力など、long形式のデータ。
-        各カードの属性が列として入っていることを前提とする。
+        各プロファイルの属性が列として入っていることを前提とする。
 
     reference_levels : dict
         ``{"属性名": 基準水準}`` の辞書。
@@ -67,12 +68,31 @@ def encode(
                 "camera": "標準",
             }
 
+    respondent_encode : dict, optional
+        回答者属性を ``0/1`` の2値にコード化したい場合に指定する辞書。
+
+        値に **文字列** を渡すと ``{列名}_0`` という列名になる。
+        値に **[0にしたい水準, 列名サフィックス]** のリストを渡すと
+        ``{列名}_{サフィックス}`` という列名になる。
+
+        * ``0`` になる水準を明示的に選べる（例：女性→0、男性→1）。
+        * 効果コーディング（-1/1）ではなく、単純な 0/1 の2値変換。
+
+        例：
+        ::
+
+            respondent_encode = {"gender": "女性"}
+            # → gender_0 列が追加される（女性→0, 男性→1）
+
+            respondent_encode = {"gender": ["女性", "female"]}
+            # → gender_female 列が追加される（女性→0, 男性→1）
+
     binary_suffix_map : dict, optional
         2水準の属性に対して、生成する列名のサフィックス（``+1``側の水準名）を
         手動指定したい場合に使う。
         例：``{"price": "low", "os": "apple"}`` とすると ``price_low``, ``os_apple``
         という列が作られる。
-        省略時は ``+1`` 側の水準の文字列をそのまま使う（例：``price_6``）。
+        省略時は ``{属性名}_0`` の形式になる（例：``price_0``）。
 
     drop_original : bool, default False
         ``True`` にすると元の属性列（``price`` など）を削除する。
@@ -162,18 +182,52 @@ def encode(
                 "  分析するには最低でも2水準が必要です。"
             )
 
-        # 2水準 と 3水準以上 で分岐
+        # 2水準 と 3水準以上 で分岐（結果はすでに out に書き込み済み）
         if len(levels) == 2:
-            new_col = _encode_binary(
-                out, attr, ref_level, suffix_map.get(attr)
-            )
+            _encode_binary(out, attr, ref_level, suffix_map.get(attr))
         else:
-            new_col = _encode_multi(out, attr, ref_level)
-            # 多水準の場合 new_col はリスト
-        # 結果はすでに out に書き込み済み
+            _encode_multi(out, attr, ref_level)
+
+    # ---------- 回答者属性の 0/1 コーディング ----------
+    if respondent_encode:
+        for attr, spec in respondent_encode.items():
+            if attr not in out.columns:
+                raise ValueError(
+                    f"列 '{attr}' が DataFrame にありません。\n"
+                    f"  存在する列: {list(out.columns)}"
+                )
+            # spec は str（zero_levelのみ）または [zero_level, suffix] のリスト
+            if isinstance(spec, list):
+                if len(spec) != 2:
+                    raise ValueError(
+                        f"respondent_encode の '{attr}' の値をリストで指定する場合は\n"
+                        f"  [0にしたい水準, 列名サフィックス] の2要素にしてください。\n"
+                        f"  例: ['女性', 'female']"
+                    )
+                zero_level, suffix = spec[0], str(spec[1])
+            else:
+                zero_level, suffix = spec, "0"
+
+            levels = _unique_levels(out[attr])
+            if zero_level not in levels:
+                raise ValueError(
+                    f"属性 '{attr}' に水準 '{zero_level}' が見つかりません。\n"
+                    f"  存在する水準: {levels}"
+                )
+            if len(levels) != 2:
+                raise ValueError(
+                    f"respondent_encode の属性 '{attr}' は2水準である必要があります。\n"
+                    f"  現在の水準数: {len(levels)}（{levels}）"
+                )
+            one_level = [lv for lv in levels if lv != zero_level][0]
+            new_col = f"{attr}_{suffix}"
+            out[new_col] = out[attr].map({zero_level: 0, one_level: 1})
 
     if drop_original:
-        out = out.drop(columns=list(reference_levels.keys()))
+        drop_cols = list(reference_levels.keys())
+        if respondent_encode:
+            drop_cols += list(respondent_encode.keys())
+        out = out.drop(columns=drop_cols)
 
     # 後で fit() が再利用できるよう、メタ情報を attrs に保存
     # （df.attrs は pandas のユーザー定義メタデータ機構）
@@ -265,14 +319,6 @@ def _unique_levels(s: pd.Series) -> List:
     return list(pd.Series(s.dropna().unique()))
 
 
-def _safe_level_str(level) -> str:
-    """
-    水準名を列名に使える文字列に変換する。
-    数値はそのまま str()、文字列はそのまま使う。
-    """
-    return str(level)
-
-
 def _encode_binary(
     df: pd.DataFrame, attr: str, ref_level, manual_suffix: Optional[str]
 ) -> str:
@@ -283,7 +329,7 @@ def _encode_binary(
     列名規則
     --------
     * ``manual_suffix`` が指定されていれば ``{attr}_{manual_suffix}``
-    * そうでなければ ``{attr}_{+1側の水準を文字列化したもの}``
+    * そうでなければ ``{attr}_0``
     """
     levels = _unique_levels(df[attr])
     other = [lv for lv in levels if lv != ref_level][0]
