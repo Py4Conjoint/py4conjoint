@@ -9,14 +9,16 @@ analysis.py
 >>> df_coded = pc.encode(df, reference_levels={...})
 >>> result = pc.fit(df_coded)
 >>> result.summary()        # 和文サマリー
->>> result.importance()     # 相対重要度
->>> result.wtp()            # WTP（支払意思額）
+>>> result.importance()     # 重要度
+>>> result.wtp()            # WTP（限界支払意思額）
 >>> result.market_share(products)
+>>> pc.check_design(profiles)  # アンケート実施前の直交性チェック
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Set, Union
+import unicodedata
 
 import numpy as np
 import pandas as pd
@@ -62,6 +64,86 @@ class Diagnostic:
 
 
 # ---------------------------------------------------------------------------
+# デザインチェック結果オブジェクト
+# ---------------------------------------------------------------------------
+
+@dataclass
+class DesignCheckResult:
+    """
+    check_design() の診断結果を保持するオブジェクト。
+
+    Attributes
+    ----------
+    balance : pd.DataFrame
+        各属性の水準出現頻度と変動係数（CV）。
+        列: 水準数, 最大出現, 最小出現, CV, 評価
+    correlation : pd.DataFrame
+        効果コーディング後の属性間相関行列。
+    chi2 : pd.DataFrame
+        属性ペアごとのχ²統計量と自由度。
+        列: 属性1, 属性2, χ², 自由度, χ²/自由度, 評価
+    diagnostics : List[Diagnostic]
+        検出された問題の一覧。
+    """
+    balance: pd.DataFrame
+    correlation: pd.DataFrame
+    chi2: pd.DataFrame
+    diagnostics: List[Diagnostic]
+
+    def summary(self) -> str:
+        """診断結果を人間が読みやすい形式で返す。"""
+        lines = ["=" * 55, "デザイン直交性チェック", "=" * 55]
+
+        lines.append("\n【水準バランス】（CV が小さいほど均等）")
+        lines.append(_df_to_string_cjk(self.balance, index=True))
+
+        lines.append("\n【属性間相関】（0 に近いほど直交）")
+        lines.append(self.correlation.to_string())
+
+        lines.append("\n【独立性（χ²統計量）】（自由度に対して小さいほど独立）")
+        lines.append(_df_to_string_cjk(self.chi2, index=False))
+
+        diags = sorted(
+            self.diagnostics,
+            key=lambda d: SEVERITY_ORDER.get(d.severity, 99)
+        )
+        if diags:
+            lines.append("\n【警告】")
+            for d in diags:
+                lines.append(f"  [{d.severity}] {d.message}")
+                lines.append(f"      → {d.recommendation}")
+        else:
+            lines.append("\n警告はありません。")
+
+        lines.append("=" * 55)
+        return "\n".join(lines)
+
+    def warnings(self) -> pd.DataFrame:
+        """警告一覧を DataFrame で返す。"""
+        if not self.diagnostics:
+            return pd.DataFrame(
+                columns=["severity", "category", "message", "recommendation"]
+            )
+        return pd.DataFrame(
+            [
+                {
+                    "severity": d.severity,
+                    "category": d.category,
+                    "message": d.message,
+                    "recommendation": d.recommendation,
+                }
+                for d in sorted(
+                    self.diagnostics,
+                    key=lambda d: SEVERITY_ORDER.get(d.severity, 99)
+                )
+            ]
+        )
+
+    def __repr__(self) -> str:
+        return self.summary()
+
+
+# ---------------------------------------------------------------------------
 # 公開API: fit関数
 # ---------------------------------------------------------------------------
 
@@ -73,6 +155,8 @@ def fit(
     reference_levels: Optional[Dict[str, object]] = None,
     price_col: str = "price",
     formula: Optional[str] = None,
+    respondent_id_col: str = "回答者ID",
+    cluster_se: bool = True,
 ) -> "ConjointResult":
     """
     コンジョイント分析の回帰モデルを推定し、結果オブジェクトを返す。
@@ -91,11 +175,16 @@ def fit(
 
     rating : str, default "rating"
         被説明変数（評点）の列名。
+        ``formula`` 指定時は無視され、formula の左辺が使われる。
 
     encoded_columns : list of str, optional
         説明変数として使う符号化列のリスト。
         省略時は ``reference_levels`` から自動推定するか、
-        値が ``-1, 0, 1`` のみを取る列を自動検出する。
+        効果コーディング済みの列（``-1`` と ``1`` を含み、値が
+        ``-1, 0, 1`` に収まる数値列）を自動検出する。
+        回答者属性などの ``0/1`` 列は自動検出に含まれないため、
+        説明変数に加えたい場合はこの引数で明示的に指定する。
+        ``formula`` 指定時は無視される。
 
     reference_levels : dict, optional
         :func:`encode` に渡したのと同じ辞書。
@@ -109,7 +198,22 @@ def fit(
     formula : str, optional
         statsmodels 用の回帰式を直接指定したい場合に使う。
         例：``"rating ~ price_low + os_apple + camera_high"``
-        通常は省略してよい（自動構築される）。
+        指定した場合、被説明変数は formula の左辺から、説明変数は
+        右辺から自動取得される（``rating``・``encoded_columns`` 引数は
+        無視される）。通常は省略してよい（自動構築される）。
+
+    respondent_id_col : str, default "回答者ID"
+        回答者ID列の名前（:func:`forms_to_conjoint_data` のデフォルト列名と同じ）。
+        クラスタロバスト標準誤差のグループ化と、回答者数の診断
+        （``few_respondents``）に使う。
+
+    cluster_se : bool, default True
+        ``True`` かつ回答者ID列が存在し回答者が2人以上いる場合、
+        回答者IDでグループ化した **クラスタロバスト標準誤差** を使う。
+        同じ回答者の複数回答は独立でないため、通常のOLS標準誤差では
+        p値が過小（有意に出やすすぎ）になる。
+        係数の推定値自体はどちらでも変わらない。
+        ``False`` にすると通常のOLS標準誤差を使う。
 
     Returns
     -------
@@ -131,10 +235,22 @@ def fit(
 
     * R² が極端に低い（< 0.20）場合：仮定の妥当性に疑問。
 
+    * 観測数 ÷ 説明変数数が低い場合（重大度：5倍未満=大、10倍未満=中）：
+      推定が不安定になる。:func:`suggest_n_profiles` の ``obs_per_predictor`` と
+      対応する閾値。
+
     * 回答者が1人の場合（重大度：大）または2〜4人の場合（重大度：中）：
       個人・少数の好みを集団の傾向と誤解する危険。
+      回答者ID列（``respondent_id_col``）がある場合のみ判定する。
+
+    * 回答者ID列が見つからない場合（重大度：中、``independence_assumed``）：
+      観測の独立性を仮定した通常の標準誤差を使用するため、
+      同一回答者の複数回答が含まれているとp値が過小になる恐れ。
     """
     # ---------- 入力チェック ----------
+    if formula is not None:
+        # formula 指定時は被説明変数を formula の左辺から取得する
+        rating = formula.split("~")[0].strip()
     if rating not in df.columns:
         raise ValueError(
             f"評点列 '{rating}' が DataFrame にありません。\n"
@@ -149,38 +265,58 @@ def fit(
         meta = df.attrs.get("py4conjoint", {}) if hasattr(df, "attrs") else {}
         reference_levels = meta.get("reference_levels")
 
-    # ---------- 説明変数の決定 ----------
-    if encoded_columns is None:
-        encoded_columns = _detect_encoded_columns(
-            df, rating=rating, reference_levels=reference_levels
-        )
-    if len(encoded_columns) == 0:
-        raise ValueError(
-            "符号化済みの説明変数が見つかりませんでした。\n"
-            "  encode() で符号化を済ませているか確認してください。\n"
-            "  または encoded_columns 引数で明示的に列を指定してください。"
-        )
-
-    # 列の存在確認
-    missing = [c for c in encoded_columns if c not in df.columns]
-    if missing:
-        raise ValueError(
-            f"指定された符号化列が DataFrame にありません: {missing}\n"
-            f"  存在する列: {list(df.columns)}"
-        )
-
-    # ---------- 回帰実行 ----------
-    # NaN行を落としつつ、何件落としたかを記録（落とし穴チェック用）
-    use_cols = [rating] + list(encoded_columns)
     n_before = len(df)
-    df_fit = df[use_cols].dropna()
-    n_after = len(df_fit)
-
-    # formula が明示指定されていれば、列名はそのまま使う前提
     alias_map: Dict[str, str] = {}
+
+    # 回答者IDでクラスタリングするか（回答者が2人以上いる場合のみ）
+    use_cluster = (
+        cluster_se
+        and respondent_id_col in df.columns
+        and df[respondent_id_col].nunique() >= 2
+    )
+
     if formula is not None:
-        res: RegressionResults = smf.ols(formula, data=df).fit()
+        # ---------- formula 指定時 ----------
+        # 説明変数は formula の右辺（推定後の exog 名）から取得する。
+        # 自動検出と食い違うと importance()/wtp() が KeyError になるため、
+        # formula を唯一の情報源とし、encoded_columns 引数は使わない。
+        model = smf.ols(formula, data=df)
+        if use_cluster:
+            # patsy が NaN 行を落とすため、残った行に対応するグループを渡す
+            groups = df.loc[model.data.row_labels, respondent_id_col]
+            res: RegressionResults = model.fit(
+                cov_type="cluster", cov_kwds={"groups": groups}
+            )
+        else:
+            res = model.fit()
+        encoded_columns = [n for n in res.model.exog_names if n != "Intercept"]
+        n_dropped = n_before - int(res.nobs)
     else:
+        # ---------- 説明変数の決定 ----------
+        if encoded_columns is None:
+            encoded_columns = _detect_encoded_columns(
+                df, rating=rating, reference_levels=reference_levels
+            )
+        if len(encoded_columns) == 0:
+            raise ValueError(
+                "符号化済みの説明変数が見つかりませんでした。\n"
+                "  encode() で符号化を済ませているか確認してください。\n"
+                "  または encoded_columns 引数で明示的に列を指定してください。"
+            )
+
+        # 列の存在確認
+        missing = [c for c in encoded_columns if c not in df.columns]
+        if missing:
+            raise ValueError(
+                f"指定された符号化列が DataFrame にありません: {missing}\n"
+                f"  存在する列: {list(df.columns)}"
+            )
+
+        # ---------- 回帰実行 ----------
+        # NaN行を落としつつ、何件落としたかを記録（落とし穴チェック用）
+        use_cols = [rating] + list(encoded_columns)
+        n_dropped = n_before - len(df[use_cols].dropna())
+
         # 日本語など formula で扱いにくい列名を、内部的に英数字エイリアスへ
         # 一時リネームして回帰し、推定後に係数名を元に戻す。
         # こうすることで `result.params["camera_高性能"]` のように
@@ -192,13 +328,22 @@ def fit(
         rating_alias = "__pc_rating__"
         rev_map[rating_alias] = rating
 
-        df_alias = df[use_cols].rename(
+        # クラスタリングに使う回答者ID列も保持しておく（formula は参照しない）
+        model_cols = list(use_cols)
+        if use_cluster and respondent_id_col not in model_cols:
+            model_cols.append(respondent_id_col)
+        df_alias = df[model_cols].rename(
             columns={**alias_map, rating: rating_alias}
         )
         formula_alias = (
             f"{rating_alias} ~ " + " + ".join(alias_map[c] for c in encoded_columns)
         )
-        res = smf.ols(formula_alias, data=df_alias).fit()
+        model = smf.ols(formula_alias, data=df_alias)
+        if use_cluster:
+            groups = df_alias.loc[model.data.row_labels, respondent_id_col]
+            res = model.fit(cov_type="cluster", cov_kwds={"groups": groups})
+        else:
+            res = model.fit()
         # 係数名を元に戻す
         res = _rename_result_index(res, rev_map)
 
@@ -209,14 +354,83 @@ def fit(
         encoded_columns=list(encoded_columns),
         reference_levels=reference_levels or {},
         price_col=price_col,
-        n_dropped=n_before - n_after,
+        n_dropped=n_dropped,
         alias_map=alias_map,
+        respondent_id_col=respondent_id_col,
+        se_type="cluster" if use_cluster else "nonrobust",
     )
 
     # ---------- 落とし穴の自動検出 ----------
     result._run_diagnostics()
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# 公開API: check_design関数
+# ---------------------------------------------------------------------------
+
+def check_design(
+    profiles: pd.DataFrame,
+    *,
+    attributes: Optional[List[str]] = None,
+) -> DesignCheckResult:
+    """
+    アンケート実施前にプロファイルの直交性を診断する。
+
+    fit() の前、forms_to_conjoint_data() の前に呼ぶことを想定。
+    scipy は不要（numpy・pandas のみで計算）。
+
+    Parameters
+    ----------
+    profiles : pd.DataFrame
+        属性と水準を持つプロファイルのDataFrame。
+        例::
+
+            profiles = pd.DataFrame({
+                "price":  [6, 10, 6, 10],
+                "os":     ["android", "apple", "apple", "android"],
+                "camera": ["標準", "標準", "高性能", "高性能"],
+            }, index=["P1", "P2", "P3", "P4"])
+            pc.check_design(profiles)
+
+    attributes : list of str, optional
+        チェック対象の属性名のリスト。省略時は profiles の全列を対象とする。
+
+    Returns
+    -------
+    DesignCheckResult
+
+    Notes
+    -----
+    χ² 統計量の p 値は計算しない（scipy 不要とするため）。
+    代わりに「χ² / 自由度」の比率と定性的な評価記号（◎○△）で判断する。
+    p 値が必要な場合は ``from scipy.stats import chi2_contingency`` を使うこと。
+    """
+    if not isinstance(profiles, pd.DataFrame):
+        raise TypeError(
+            f"profiles は pandas.DataFrame を指定してください。\n"
+            f"  受け取った型: {type(profiles).__name__}"
+        )
+    attrs = attributes or list(profiles.columns)
+    missing = [a for a in attrs if a not in profiles.columns]
+    if missing:
+        raise ValueError(
+            f"以下の属性が profiles に存在しません: {missing}\n"
+            f"  存在する列: {list(profiles.columns)}"
+        )
+
+    balance_df = _check_balance(profiles, attrs)
+    corr_df    = _check_correlation(profiles, attrs)
+    chi2_df    = _check_chi2(profiles, attrs)
+    diags      = _design_diagnostics(profiles, attrs, balance_df, corr_df, chi2_df)
+
+    return DesignCheckResult(
+        balance=balance_df,
+        correlation=corr_df,
+        chi2=chi2_df,
+        diagnostics=diags,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -258,6 +472,13 @@ class ConjointResult:
     alias_map : dict, optional
         日本語列名等を内部用エイリアスにリネームしたマップ。
         ``predict`` を呼ぶときに ``products`` をこのマップで変換する。
+
+    respondent_id_col : str
+        回答者ID列の名前。クラスタロバスト標準誤差と回答者数診断に使う。
+
+    se_type : str
+        標準誤差の種類。``"cluster"``（回答者IDによるクラスタロバスト）
+        または ``"nonrobust"``（通常のOLS標準誤差）。
     """
     ols: RegressionResults
     df: pd.DataFrame
@@ -267,10 +488,14 @@ class ConjointResult:
     price_col: str
     n_dropped: int = 0
     alias_map: Dict[str, str] = field(default_factory=dict)
+    respondent_id_col: str = "回答者ID"
+    se_type: str = "nonrobust"
 
     # 内部用：検出された警告（落とし穴）のリスト
     # Diagnostic オブジェクトとして保持する。
     _diagnostics: List[Diagnostic] = field(default_factory=list)
+    # 内部用：wtp() の重複登録防止用キーセット（category とは別に per-attribute で管理）
+    _warned_keys: Set[str] = field(default_factory=set)
 
     # ---- 基本情報の取得 ----------------------------------------------------
 
@@ -324,11 +549,17 @@ class ConjointResult:
         lines.append("=" * 60)
         lines.append("コンジョイント分析の結果（和文サマリー）")
         lines.append("=" * 60)
+        se_label = (
+            f"クラスタロバスト（{self.respondent_id_col}）"
+            if self.se_type == "cluster"
+            else "通常（観測の独立性を仮定）"
+        )
         stat_rows = [
             ("観測数",       str(self.n_obs)),
             ("説明変数の数", str(len(self.encoded_columns))),
             ("決定係数 R²",  f"{self.rsquared:.4f}"),
             ("自由度修正 R²", f"{self.ols.rsquared_adj:.4f}"),
+            ("標準誤差",     se_label),
         ]
         if self.n_dropped > 0:
             stat_rows.append(("欠損で除外", f"{self.n_dropped} 行"))
@@ -355,7 +586,7 @@ class ConjointResult:
             coef = params[name]
             p = pvals[name]
             star = _significance_stars(p)
-            lines.append(f"  {name:<{NAME_WIDTH}} {coef:>10.4f} {p:>10.4f}  {star}")
+            lines.append(f"  {_ljust_display(str(name), NAME_WIDTH)} {coef:>10.4f} {p:>10.4f}  {star}")
         lines.append("")
         lines.append("  有意水準: *** p<0.001  ** p<0.01  * p<0.05  . p<0.1")
 
@@ -403,11 +634,17 @@ class ConjointResult:
              '<p><strong>コンジョイント分析の結果</strong></p>']
 
         # 統計量
+        se_label = (
+            f"クラスタロバスト（{self.respondent_id_col}）"
+            if self.se_type == "cluster"
+            else "通常（観測の独立性を仮定）"
+        )
         stat_rows = [
             ("観測数",       str(self.n_obs)),
             ("説明変数の数", str(len(self.encoded_columns))),
             ("決定係数 R²",  f"{self.rsquared:.4f}"),
             ("自由度修正 R²", f"{self.ols.rsquared_adj:.4f}"),
+            ("標準誤差",     se_label),
         ]
         if self.n_dropped > 0:
             stat_rows.append(("欠損で除外", f"{self.n_dropped} 行"))
@@ -482,8 +719,11 @@ class ConjointResult:
             それらのリスト（例：``["大", "中"]``）。
             省略時はすべての警告を返す。
         category : str または list of str, optional
-            カテゴリでフィルタする。例：``"r2_low"``, ``"price_insignificant"``,
-            ``"wtp_extrapolation"``。
+            カテゴリでフィルタする。
+            利用可能な値：``"price_sign_negative"``, ``"r2_low"``,
+            ``"obs_per_predictor"``, ``"few_respondents"``,
+            ``"independence_assumed"``, ``"price_insignificant"``,
+            ``"wtp_extrapolation"``, ``"wtp_price_linear_approx"``。
             省略時はすべて返す。
         as_dataframe : bool, default True
             ``True`` なら ``pd.DataFrame``（列：severity, category, message,
@@ -537,11 +777,11 @@ class ConjointResult:
             ]
         )
 
-    # ---- 相対重要度 -------------------------------------------------------
+    # ---- 重要度 -------------------------------------------------------
 
     def importance(self, *, as_percent: bool = True) -> pd.DataFrame:
         """
-        各属性の **相対重要度（Relative Importance）** を計算する。
+        各属性の **重要度（Relative Importance）** を計算する。
 
         計算方法
         --------
@@ -562,16 +802,25 @@ class ConjointResult:
         Returns
         -------
         pd.DataFrame
-            列：``range`` （効用範囲）, ``importance`` （重要度）。
-            インデックスは属性名。``importance`` の合計は100（または1）になる。
+            列：``効用範囲``, ``重要度``。
+            インデックスは属性名。``重要度`` の合計は100（または1）になる。
+
+        Notes
+        -----
+        重要度は **調査で選んだ水準のレンジに依存する相対指標** であり、
+        属性の本質的な重要性ではない。
+        たとえば価格の水準を 6〜10万円 から 6〜20万円 に広げると、
+        価格の効用範囲が広がり、価格の重要度は大きく計算される。
+        水準レンジの異なる調査間で重要度を比較してはいけない。
 
         Examples
         --------
         >>> result.importance()
-                       range  importance
-        price          1.234       45.6
-        os             0.567       21.0
-        camera         0.901       33.4
+                効用範囲   重要度
+        属性
+        price      1.234   45.6
+        os         0.567   21.0
+        camera     0.901   33.4
         """
         attr_ranges = self._attribute_ranges()
         total = sum(attr_ranges.values())
@@ -584,31 +833,57 @@ class ConjointResult:
             imp = rng / total
             if as_percent:
                 imp *= 100.0
-            rows.append({"attribute": attr, "range": rng, "importance": imp})
+            rows.append({"attribute": attr, "効用範囲": rng, "重要度": imp})
         out = pd.DataFrame(rows).set_index("attribute")
         out.index.name = "属性"
         return out
 
-    # ---- WTP（支払意思額） ------------------------------------------------
+    # ---- WTP（限界支払意思額） ----------------------------------------------
 
     def wtp(self, *, price_col: Optional[str] = None) -> pd.DataFrame:
         """
-        各非価格属性の **WTP（支払意思額、Willingness to Pay）** を計算する。
+        各非価格属性の **WTP（限界支払意思額、Marginal Willingness to Pay）** を計算する。
 
         定義
         ----
         WTPは「ある属性を基準水準から非基準水準に変えるとき、回答者が
         最大いくらまで追加で支払ってもよいと思うか」を金額で表す。
 
-        ノートブックの式：
+        厳密には **限界支払意思額（Marginal Willingness to Pay, MWTP）**
+        である。他の属性をすべて一定に保ったまま1つの属性だけを変える
+        ときの追加支払額（属性と価格の限界代替率）であり、
+        **製品全体に対する支払上限額（総WTP・留保価格）ではない** 点に
+        注意。選択型コンジョイントの文献で ``MWTP = -β_attr / β_price``
+        と定義されるものと同じ構造を、評点型に適用したもの。
+
+        **2水準価格の場合**
 
         .. code-block:: python
 
             wtp_price_factor = -(low_price - high_price) / b_price
             wtp = wtp_price_factor * b_attr
 
-        を一般化したもの。``low_price - high_price`` は負の値なので、
-        マイナスを付けて正のスケール係数にする。
+        ``low_price - high_price`` は負の値なので、マイナスを付けて正のスケール係数にする。
+
+        **3水準以上の価格の場合**
+
+        価格水準と部分効用を線形近似（``np.polyfit``）し、
+        傾き ``slope`` から ``wtp_price_factor = -2 / slope`` を求める。
+        ``wtp_price_linear_approx`` 警告が自動追加される（重大度：中）。
+
+        **非価格属性のWTP（水準数によらず共通）**
+
+        効果コーディングでは基準水準の効用が ``-Σ b_j`` になるため、
+        基準水準から水準 k への効用差は ``b_k + Σ b_j``。
+        これに「評点1点あたりの金額」（``wtp_price_factor / 2``）を掛けた値を
+        WTPとする。
+
+        .. code-block:: python
+
+            wtp_k = (b_k + Σ b_j) * wtp_price_factor / 2
+
+        2水準属性では効用差が ``2 × b`` となるので、
+        ``wtp = wtp_price_factor * b_attr`` と同値。
 
         Parameters
         ----------
@@ -618,20 +893,28 @@ class ConjointResult:
         Returns
         -------
         pd.DataFrame
-            列：``係数``, ``支払意思額``（価格と同じ単位）。
+            列：``係数``, ``限界支払意思額``（価格と同じ単位）。
             インデックスは非価格属性の符号化列名。
+            3水準以上の非価格属性には K-1 行が出力される。
 
         Raises
         ------
         ValueError
             価格列がデータにない、または価格の符号化列が見つからない場合。
+            3水準以上の価格で ``reference_levels`` に価格属性がない場合。
 
         Notes
         -----
         * 価格列の単位（万円・千円・円など）に依存するので、結果の単位は
           元データと同じ。
-        * 価格係数 ``b_price`` の符号が正常（価格が低い水準で正、高い水準で負）
-          であることが前提。逆になっている場合は警告が出る。
+        * 2水準価格のみ：価格係数 ``b_price`` が正（価格が低い水準で高評価）
+          であることが前提。有意かつ負の場合は ``price_sign_negative`` 警告が出る。
+        * ``price_insignificant`` 警告と戻り値の ``attrs["p_price"]`` は、
+          2水準価格では価格係数の t 検定、3水準以上では
+          「すべての価格係数 = 0」の同時 F 検定の p値で判定する。
+        * 計算は「貨幣の限界効用が一定（価格効用が線形）・所得効果なし」を
+          仮定している。この仮定の下では補償変分と等価変分が一致し、
+          MWTP = 効用差 ÷ 貨幣の限界効用 となる。
         """
         price_col = price_col or self.price_col
         if price_col not in self.df.columns:
@@ -648,36 +931,28 @@ class ConjointResult:
                 f"価格列 '{price_col}' に対応する符号化列が見つかりません。\n"
                 f"  encode() で価格属性も符号化しているか確認してください。"
             )
-        if len(price_encoded) > 1:
-            raise NotImplementedError(
-                f"価格属性が3水準以上で符号化されています: {price_encoded}\n"
-                f"  現状のWTP計算は2水準の価格にのみ対応しています。"
-            )
 
         price_enc_col = price_encoded[0]
-        b_price = float(self.params[price_enc_col])
-        p_price = float(self.ols.pvalues[price_enc_col])
+        p_price = self._price_pvalue(price_encoded)
 
         # 価格の元の水準を取得
         price_levels = sorted(self.df[price_col].dropna().unique().tolist())
-        if len(price_levels) != 2:
-            raise NotImplementedError(
-                f"価格列 '{price_col}' は {len(price_levels)} 水準あります。\n"
-                f"  現状のWTP計算は2水準にのみ対応しています。"
-            )
-        low_price, high_price = price_levels[0], price_levels[1]
+        low_price, high_price = price_levels[0], price_levels[-1]
         price_range = float(high_price - low_price)
 
         # ---- 警告①：価格係数の有意性（p ≥ 0.10） ----
         # 重複登録を防ぐ（wtp() は複数回呼ばれる可能性がある）
         already_cats = {d.category for d in self._diagnostics}
         if p_price >= 0.10 and "price_insignificant" not in already_cats:
+            test_label = (
+                "価格係数" if len(price_encoded) == 1 else "価格係数の同時F検定"
+            )
             self._diagnostics.append(
                 Diagnostic(
                     severity="中",
                     category="price_insignificant",
                     message=(
-                        f"価格係数（p値 = {p_price:.3f}）が有意水準 0.10 を超えています。"
+                        f"{test_label}（p値 = {p_price:.3f}）が有意水準 0.10 を超えています。"
                         "WTP の計算は価格係数を分母に使うため、"
                         "係数が不確実だと WTP の信頼性も低くなります。"
                     ),
@@ -687,37 +962,68 @@ class ConjointResult:
                     ),
                 )
             )
-        price_is_significant = p_price < 0.10
 
-        # WTP計算のスケール係数: price_range / b_price
+        # WTP計算のスケール係数
         # WTP_attr = wtp_price_factor * b_attr として使う。
-        # ※「評点1点の金額」は unit_rating_money() = price_range / (2*b_price) であり、
-        #   こちらはその2倍（効果コーディングで属性変化時の効用差が 2*b_attr になるため）。
-        wtp_price_factor = -(low_price - high_price) / b_price
+        # ※「評点1点の金額」は unit_rating_money() = wtp_price_factor / 2 。
+        if len(price_levels) == 2:
+            b_price = float(self.params[price_enc_col])
+            # -(low_price - high_price) / b_price = (high - low) / b_price
+            wtp_price_factor = -(low_price - high_price) / b_price
+        else:
+            # 3水準以上: 線形近似で価格感度を推定
+            wtp_price_factor = self._calc_price_sensitivity(price_col)
+            cat_key = "wtp_price_linear_approx"
+            if cat_key not in already_cats:
+                self._diagnostics.append(
+                    Diagnostic(
+                        severity="中",
+                        category="wtp_price_linear_approx",
+                        message=(
+                            f"価格が {len(price_levels)} 水準あるため、"
+                            "価格効用が線形であると仮定してWTPを計算しています。"
+                        ),
+                        recommendation=(
+                            "価格効用が等間隔でない場合は近似誤差が生じます。"
+                            "result.warnings() で詳細を確認してください。"
+                        ),
+                    )
+                )
 
+        # 価格属性の符号化列（2水準なら1列、3水準以上なら複数列）をすべて除外し、
+        # 属性ごとにグルーピングして「基準水準からの効用差」を金額換算する。
+        # 効果コーディングでは基準水準の効用 = -Σ b_j なので、
+        # 基準→水準k の効用差 = b_k + Σ b_j（2水準属性では 2b に一致し、
+        # 従来式 wtp_price_factor × b と同値）。
+        price_encoded_set = set(price_encoded)
+        money_per_utility = wtp_price_factor / 2.0  # 評点1点あたりの金額
+        groups = _group_columns_by_attribute(
+            self.encoded_columns, list(self.reference_levels.keys())
+        )
         rows = []
-        for col in self.encoded_columns:
-            if col == price_enc_col:
-                continue
-            b = float(self.params[col])
-            wtp_value = wtp_price_factor * b
-            rows.append({"variable": col, "係数": b, "支払意思額": wtp_value})
+        for attr, cols in groups.items():
+            if all(c in price_encoded_set for c in cols):
+                continue  # 価格属性はWTP出力に含めない
+            bs = [float(self.params[c]) for c in cols]
+            sum_b = sum(bs)
+            for col, b in zip(cols, bs):
+                wtp_value = (b + sum_b) * money_per_utility
+                rows.append({"variable": col, "係数": b, "限界支払意思額": wtp_value})
 
         out = pd.DataFrame(rows).set_index("variable")
         out.index.name = "属性（符号化列名）"
 
         # ---- 警告②：WTP が価格レンジ × 2 を超える（外挿） ----
-        # 価格係数が有意でない場合は「大」、有意な場合は「中」
         for _, row in out.iterrows():
             attr_col = row.name
-            wtp_val = float(row["支払意思額"])
+            wtp_val = float(row["限界支払意思額"])
             threshold = price_range * 2
             cat_key = f"wtp_extrapolation_{attr_col}"
-            if abs(wtp_val) > threshold and cat_key not in already_cats:
-                sev = "中"
+            if abs(wtp_val) > threshold and cat_key not in self._warned_keys:
+                self._warned_keys.add(cat_key)
                 self._diagnostics.append(
                     Diagnostic(
-                        severity=sev,
+                        severity="中",
                         category="wtp_extrapolation",
                         message=(
                             f"{attr_col} の WTP（{wtp_val:.2f}）が"
@@ -747,8 +1053,25 @@ class ConjointResult:
         """
         評点1ポイントが何円（または何万円）に相当するかを返す。
 
-        計算式: (price_max - price_min) / abs(price_coef * 2)
+        2水準: ``(price_max - price_min) / abs(price_coef * 2)``
+        3水準以上: 価格水準と部分効用の線形近似スロープから算出（``wtp()`` の仮定と同じ）。
         単位は価格列の単位と同じ。例えば価格が万円単位なら、戻り値も万円単位。
+
+        Parameters
+        ----------
+        price_col : str, optional
+            価格列名。``fit`` で設定した値を上書きしたい場合に使う。
+
+        Returns
+        -------
+        float
+            評点 1 ポイント相当の金額（価格列と同じ単位）。
+
+        Raises
+        ------
+        ValueError
+            価格列がデータにない場合。
+            価格の符号化列が見つからない場合。
         """
         price_col = price_col or self.price_col
         if price_col not in self.df.columns:
@@ -756,18 +1079,17 @@ class ConjointResult:
                 f"価格列 '{price_col}' が DataFrame にありません。"
             )
         price_encoded = self._find_encoded_for(price_col)
-        if not price_encoded or len(price_encoded) != 1:
+        if not price_encoded:
             raise ValueError(
                 f"価格列 '{price_col}' に対応する符号化列が見つかりません。"
             )
-        b_price = float(self.params[price_encoded[0]])
         price_levels = sorted(self.df[price_col].dropna().unique().tolist())
-        if len(price_levels) != 2:
-            raise ValueError(
-                f"価格列 '{price_col}' は {len(price_levels)} 水準あります。2水準のみ対応しています。"
-            )
-        price_range = float(price_levels[1] - price_levels[0])
-        return price_range / abs(b_price * 2)
+        if len(price_levels) == 2:
+            b_price = float(self.params[price_encoded[0]])
+            price_range = float(price_levels[1] - price_levels[0])
+            return price_range / abs(b_price * 2)
+        # 3水準以上: wtp_price_factor / 2
+        return self._calc_price_sensitivity(price_col) / 2.0
 
     # ---- 市場シェア予測 ---------------------------------------------------
 
@@ -805,9 +1127,9 @@ class ConjointResult:
         Examples
         --------
         >>> products = pd.DataFrame({
-        ...     "price_0":  [1, 0],   # 製品A: 6万円, 製品B: 10万円
-        ...     "os_0":     [0, 1],
-        ...     "camera_0": [1, 1],
+        ...     "price_0":  [ 1, -1],   # 製品A: 6万円, 製品B: 10万円
+        ...     "os_0":     [-1,  1],   # 製品A: android, 製品B: apple
+        ...     "camera_0": [ 1,  1],   # 両製品とも高性能
         ... }, index=["製品A", "製品B"])
         >>> result.market_share(products)
         製品A    0.327
@@ -853,9 +1175,9 @@ class ConjointResult:
 
     # ---- 可視化系のショートカット（plot.py に委譲） ------------------------
 
-    def plot_importance(self, **kwargs):
+    def plot_importance(self, **kwargs: Any) -> Any:
         """
-        相対重要度の棒グラフを描画する。:func:`py4conjoint.plot.plot_importance`
+        重要度の棒グラフを描画する。:func:`py4conjoint.plot.plot_importance`
         へのショートカット。
 
         Returns
@@ -865,7 +1187,7 @@ class ConjointResult:
         from .plot import plot_importance
         return plot_importance(self, **kwargs)
 
-    def plot_partworth(self, **kwargs):
+    def plot_partworth(self, **kwargs: Any) -> Any:
         """
         部分効用（パートワース）の棒グラフを描画する。
         :func:`py4conjoint.plot.plot_partworth` へのショートカット。
@@ -873,7 +1195,7 @@ class ConjointResult:
         from .plot import plot_partworth
         return plot_partworth(self, **kwargs)
 
-    def plot_wtp(self, **kwargs):
+    def plot_wtp(self, **kwargs: Any) -> Any:
         """
         WTPの棒グラフを描画する。:func:`py4conjoint.plot.plot_wtp` へのショートカット。
         """
@@ -881,6 +1203,62 @@ class ConjointResult:
         return plot_wtp(self, **kwargs)
 
     # ---- 内部処理 ---------------------------------------------------------
+
+    def _price_pvalue(self, price_encoded: List[str]) -> float:
+        """
+        価格の有意性の p値を返す。
+
+        2水準（符号化列が1本）：係数の t 検定の p値。
+        3水準以上（符号化列が複数）：「すべての価格係数 = 0」の
+        同時 F 検定の p値。先頭列の p値だけでは多水準価格の
+        有意性を正しく判定できないため。
+        """
+        if len(price_encoded) == 1:
+            return float(self.ols.pvalues[price_encoded[0]])
+        exog_names = list(self.ols.model.exog_names)
+        R = np.zeros((len(price_encoded), len(exog_names)))
+        for i, c in enumerate(price_encoded):
+            R[i, exog_names.index(c)] = 1.0
+        return float(self.ols.f_test(R).pvalue)
+
+    def _calc_price_sensitivity(self, price_col: str) -> float:
+        """
+        wtp_price_factor を返す（WTP = wtp_price_factor * b_attr）。
+
+        3水準以上の価格専用。価格水準と部分効用を線形近似し、
+        slope（utility / price）から -2/slope を返す。
+        戻り値は正（価格が上がると効用が下がる通常財の場合）。
+
+        呼び出し元: wtp()・unit_rating_money() の 3水準以上ブランチのみ。
+        """
+        price_encoded = self._find_encoded_for(price_col)
+        price_levels = sorted(self.df[price_col].dropna().unique().tolist())
+
+        # 3水準以上: データから各符号化列が対応する価格水準を特定する
+        price_util_map: Dict[float, float] = {}
+        for enc_col in price_encoded:
+            rows_1 = self.df[self.df[enc_col] == 1]
+            if len(rows_1) > 0:
+                level = float(rows_1[price_col].iloc[0])
+                price_util_map[level] = float(self.params[enc_col])
+
+        # 基準水準の効用 = -(他の水準の係数の和)
+        bs = np.array([float(self.params[c]) for c in price_encoded])
+        ref_price = self.reference_levels.get(price_col)
+        if ref_price is None:
+            raise ValueError(
+                f"価格属性 '{price_col}' の基準水準が reference_levels に見つかりません。\n"
+                f"  3水準以上の価格WTPには基準水準が必要です。\n"
+                f"  fit() の reference_levels 引数で明示的に指定してください。\n"
+                f"  例: pc.fit(df_coded, reference_levels={{'{price_col}': 基準値}})"
+            )
+        price_util_map[float(ref_price)] = float(-bs.sum())
+
+        price_arr = np.array(price_levels, dtype=float)
+        util_arr = np.array([price_util_map[p] for p in price_levels], dtype=float)
+        slope, _ = np.polyfit(price_arr, util_arr, 1)
+        # slope < 0 for normal goods; wtp_price_factor = -2/slope > 0
+        return -2.0 / slope
 
     def _attribute_ranges(self) -> Dict[str, float]:
         """
@@ -907,7 +1285,10 @@ class ConjointResult:
     def _find_encoded_for(self, original_col: str) -> Optional[List[str]]:
         """
         元の属性列名に対応する符号化列を見つける。
-        ``encode()`` の命名規則 ``{original}_{インデックス}`` に基づく。
+
+        ``{original_col}_`` で始まるすべての符号化列を返す。
+        デフォルト命名（``{attr}_0``, ``{attr}_1`` ...）でも
+        ``suffix_map`` 指定時のカスタム名でも機能する。
         """
         prefix = f"{original_col}_"
         cols = [c for c in self.encoded_columns if c.startswith(prefix)]
@@ -932,12 +1313,21 @@ class ConjointResult:
 
         4. **few_respondents**（重大度：大 or 中）
            回答者が1人なら「大」、2〜4人なら「中」。
+           ``回答者ID`` 列がある場合のみ判定する。
 
-        5. **price_insignificant**（重大度：中、:meth:`wtp` 呼出時）
-           価格係数の p値 ≥ 0.10。WTP計算の分母が不確実。
+        5. **independence_assumed**（重大度：中）
+           回答者ID列が見つからず、観測の独立性を仮定した通常の標準誤差を
+           使用している。同一回答者の複数回答があるとp値が過小になる。
 
-        6. **wtp_extrapolation**（重大度：中、:meth:`wtp` 呼出時）
+        6. **price_insignificant**（重大度：中、:meth:`wtp` 呼出時）
+           価格の p値 ≥ 0.10（2水準は t 検定、3水準以上は同時 F 検定）。
+           WTP計算の分母が不確実。
+
+        7. **wtp_extrapolation**（重大度：中、:meth:`wtp` 呼出時）
            ``|WTP| > 価格レンジ × 2``。観測範囲外への外挿。
+
+        8. **wtp_price_linear_approx**（重大度：中、:meth:`wtp` 呼出時）
+           価格が 3 水準以上のため、価格効用が線形と仮定して WTP を計算した。
         """
         # 1) 価格係数の符号（有意な場合のみ）
         if self.price_col in self.df.columns:
@@ -1015,8 +1405,8 @@ class ConjointResult:
                 )
 
         # 4) 回答者数の確認
-        if "回答者ID" in self.df.columns:
-            n_resp = int(self.df["回答者ID"].nunique())
+        if self.respondent_id_col in self.df.columns:
+            n_resp = int(self.df[self.respondent_id_col].nunique())
             if n_resp == 1:
                 self._diagnostics.append(
                     Diagnostic(
@@ -1047,6 +1437,24 @@ class ConjointResult:
                         ),
                     )
                 )
+        else:
+            # 5) 回答者ID列がない → クラスタリングできず独立性を仮定
+            self._diagnostics.append(
+                Diagnostic(
+                    severity="中",
+                    category="independence_assumed",
+                    message=(
+                        f"回答者ID列 '{self.respondent_id_col}' が見つからないため、"
+                        "観測の独立性を仮定した通常の標準誤差を使用しています。"
+                        "同じ回答者の複数回答が含まれる場合、p値が過小"
+                        "（有意に出やすく）になります。"
+                    ),
+                    recommendation=(
+                        "回答者を識別できる列がある場合は、fit() の "
+                        "respondent_id_col 引数でその列名を指定してください。"
+                    ),
+                )
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -1103,7 +1511,6 @@ def _significance_stars(p: float) -> str:
 
 def _display_width(s: str) -> int:
     """Wide(W)・Fullwidth(F) を2列、それ以外を1列として扱う。"""
-    import unicodedata
     return sum(
         2 if unicodedata.east_asian_width(c) in ("W", "F") else 1
         for c in s
@@ -1120,6 +1527,42 @@ def _rjust_display(s: str, width: int) -> str:
     return " " * max(0, width - _display_width(s)) + s
 
 
+def _df_to_string_cjk(df: pd.DataFrame, index: bool = True) -> str:
+    """全角文字の表示幅を正しく考慮した DataFrame 文字列化。"""
+    str_df = df.reset_index() if index else df.copy()
+    cols = list(str_df.columns)
+    rows_str = [[str(v) for v in row] for row in str_df.itertuples(index=False)]
+
+    col_widths = [
+        max(_display_width(col), max((_display_width(r[i]) for r in rows_str), default=0))
+        for i, col in enumerate(cols)
+    ]
+
+    def _fmt_row(row_vals: list[str]) -> str:
+        parts = [_rjust_display(val, col_widths[i]) for i, val in enumerate(row_vals)]
+        return "  ".join(parts)
+
+    lines = [_fmt_row(cols)]
+    for row in rows_str:
+        lines.append(_fmt_row(row))
+    return "\n".join(lines)
+
+
+def _is_effect_coded_column(s: pd.Series) -> bool:
+    """
+    効果コーディング済みの列か判定する。
+
+    ``-1`` と ``1`` の両方を含み、値が ``{-1, 0, 1}`` に収まる数値列を
+    効果コーディング済みとみなす。``encode()`` の出力では基準水準（-1）と
+    対象水準（1）が必ずデータに存在するため、この条件が成り立つ。
+    ``respondent_encode`` の出力など 0/1 のみの列は含まれない。
+    """
+    if not pd.api.types.is_numeric_dtype(s):
+        return False
+    vals = set(pd.Series(s.dropna().unique()).tolist())
+    return {-1, 1}.issubset(vals) and vals.issubset({-1, 0, 1})
+
+
 def _detect_encoded_columns(
     df: pd.DataFrame,
     *,
@@ -1129,32 +1572,31 @@ def _detect_encoded_columns(
     """
     符号化列を自動検出する。
     優先順位：
-    1. reference_levels が与えられていれば、その属性名で始まる列を採用
-    2. 値が ``{-1, 0, 1}`` の部分集合に収まる数値列を採用
-       （ただし元の属性列・rating列は除外）
+    1. reference_levels が与えられていれば、その属性名 + ``"_"`` で始まり、
+       かつ効果コーディング済み（``_is_effect_coded_column()``）の列を採用。
+       元の属性列・rating列は除外し、複数の属性名に前方一致しても
+       1回だけ登録する。
+    2. フォールバック：効果コーディング済みの数値列をすべて採用
+       （0/1 のみの列＝``respondent_encode`` の出力などは含めない）。
     """
     if reference_levels:
+        attr_set = set(reference_levels.keys())
         cols: List[str] = []
-        for attr in reference_levels.keys():
-            prefix = f"{attr}_"
-            for c in df.columns:
-                if c.startswith(prefix):
-                    cols.append(c)
+        for c in df.columns:
+            if c == rating or c in attr_set:
+                continue
+            if not any(c.startswith(f"{a}_") for a in attr_set):
+                continue
+            if _is_effect_coded_column(df[c]):
+                cols.append(c)
         if cols:
             return cols
 
     # フォールバック：値の範囲で判定
-    candidates: List[str] = []
-    for c in df.columns:
-        if c == rating:
-            continue
-        s = df[c]
-        if not pd.api.types.is_numeric_dtype(s):
-            continue
-        vals = set(pd.Series(s.dropna().unique()).tolist())
-        if vals.issubset({-1, 0, 1}) and vals != {0}:
-            candidates.append(c)
-    return candidates
+    return [
+        c for c in df.columns
+        if c != rating and _is_effect_coded_column(df[c])
+    ]
 
 
 def _group_columns_by_attribute(
@@ -1188,3 +1630,203 @@ def _group_columns_by_attribute(
         attr = c.split("_")[0]
         groups.setdefault(attr, []).append(c)
     return groups
+
+
+# ---------------------------------------------------------------------------
+# check_design() の内部ヘルパー
+# ---------------------------------------------------------------------------
+
+def _check_balance(profiles: pd.DataFrame, attrs: List[str]) -> pd.DataFrame:
+    """各属性の水準出現頻度と変動係数（CV）を計算する。"""
+    rows = []
+    for attr in attrs:
+        counts = profiles[attr].value_counts()
+        mean = counts.mean()
+        cv = float(counts.std() / mean) if mean > 0 else float("inf")
+        if cv < 0.05:
+            label = "◎"
+        elif cv < 0.15:
+            label = "○"
+        else:
+            label = "△"
+        rows.append({
+            "属性": attr,
+            "水準数": len(counts),
+            "最大出現": int(counts.max()),
+            "最小出現": int(counts.min()),
+            "CV": round(cv, 4),
+            "評価": label,
+        })
+    return pd.DataFrame(rows).set_index("属性")
+
+
+def _check_correlation(profiles: pd.DataFrame, attrs: List[str]) -> pd.DataFrame:
+    """
+    効果コーディング後の属性間相関行列を計算する（scipy不要）。
+    各属性の最頻値を基準水準として自動設定する。
+    """
+    coded_parts = []
+    for attr in attrs:
+        col = profiles[attr]
+        levels = list(col.unique())
+        if len(levels) < 2:
+            continue
+        ref = col.mode().iloc[0]
+        others = [lv for lv in levels if lv != ref]
+        for i, lv in enumerate(others):
+            def _map(v, t=lv, r=ref):
+                if v == t:
+                    return 1
+                if v == r:
+                    return -1
+                return 0
+            s = col.map(_map)
+            s.name = f"{attr}__{i}" if len(others) > 1 else attr
+            coded_parts.append(s)
+    if not coded_parts:
+        return pd.DataFrame()
+    coded = pd.concat(coded_parts, axis=1)
+    return coded.corr().round(4)
+
+
+def _check_chi2(profiles: pd.DataFrame, attrs: List[str]) -> pd.DataFrame:
+    """
+    属性ペアのχ²統計量と自由度を計算する（scipy不要）。
+    p値の代わりに χ²/自由度 の比率と定性的評価を返す。
+    """
+    rows = []
+    for i, a1 in enumerate(attrs):
+        for a2 in attrs[i + 1:]:
+            ct = pd.crosstab(profiles[a1], profiles[a2]).values.astype(float)
+            row_sum = ct.sum(axis=1, keepdims=True)
+            col_sum = ct.sum(axis=0, keepdims=True)
+            n = ct.sum()
+            if n == 0:
+                continue
+            expected = row_sum @ col_sum / n
+            with np.errstate(divide="ignore", invalid="ignore"):
+                chi2_val = float(
+                    np.where(expected > 0, (ct - expected) ** 2 / expected, 0).sum()
+                )
+            dof = (ct.shape[0] - 1) * (ct.shape[1] - 1)
+            ratio = chi2_val / dof if dof > 0 else float("inf")
+            if ratio < 0.1:
+                label = "◎"
+            elif ratio < 1.0:
+                label = "○"
+            else:
+                label = "△"
+            rows.append({
+                "属性1": a1,
+                "属性2": a2,
+                "χ²": round(chi2_val, 4),
+                "自由度": dof,
+                "χ²/自由度": round(ratio, 4),
+                "評価": label,
+            })
+    return pd.DataFrame(rows)
+
+
+def _design_diagnostics(
+    profiles: pd.DataFrame,
+    attrs: List[str],
+    balance_df: pd.DataFrame,
+    corr_df: pd.DataFrame,
+    chi2_df: pd.DataFrame,
+) -> List[Diagnostic]:
+    """直交性チェックの結果から Diagnostic のリストを生成する。"""
+    diags: List[Diagnostic] = []
+
+    # プロファイル数のチェック（最低限の要件：n_profiles >= k+1）
+    n_profiles = len(profiles)
+    k_params = 1  # 切片
+    for attr in attrs:
+        k_params += len(profiles[attr].unique()) - 1
+    if n_profiles < k_params:
+        diags.append(Diagnostic(
+            severity="大",
+            category="insufficient_profiles",
+            message=(
+                f"プロファイル数（{n_profiles}）がパラメータ数（{k_params}）より少ないため、"
+                "回帰分析が実行できません。"
+            ),
+            recommendation=(
+                f"プロファイル数を少なくとも {k_params} 以上にしてください。"
+            ),
+        ))
+    elif n_profiles < k_params + 2:
+        diags.append(Diagnostic(
+            severity="中",
+            category="few_profiles",
+            message=(
+                f"プロファイル数（{n_profiles}）がパラメータ数（{k_params}）に対して"
+                "ほぼ最小限です。"
+            ),
+            recommendation="プロファイルをさらに追加すると推定の安定性が上がります。",
+        ))
+
+    # バランスチェック
+    for attr, row in balance_df.iterrows():
+        cv = row["CV"]
+        if cv > 0.3:
+            diags.append(Diagnostic(
+                severity="大",
+                category=f"balance_{attr}",
+                message=f"属性 '{attr}' の水準出現頻度が偏っています（CV={cv:.3f}）。",
+                recommendation="各水準の出現回数を均等にしてください（バランスの良いデザイン）。",
+            ))
+        elif cv > 0.15:
+            diags.append(Diagnostic(
+                severity="中",
+                category=f"balance_{attr}",
+                message=f"属性 '{attr}' の水準出現頻度にやや偏りがあります（CV={cv:.3f}）。",
+                recommendation="可能であれば各水準の出現回数を均等に近づけてください。",
+            ))
+
+    # 相関チェック（同一属性の符号化列ペアはスキップ）
+    if not corr_df.empty:
+        for col1 in corr_df.columns:
+            for col2 in corr_df.columns:
+                if col1 >= col2:
+                    continue
+                # 3水準以上の属性は "attr__i" という列名になる。同一属性内のペアは無視。
+                if col1.split("__")[0] == col2.split("__")[0]:
+                    continue
+                r = abs(float(corr_df.loc[col1, col2]))
+                if r > 0.5:
+                    diags.append(Diagnostic(
+                        severity="大",
+                        category=f"correlation_{col1}_{col2}",
+                        message=(
+                            f"'{col1}' と '{col2}' の相関が高いです（|r|={r:.3f}）。"
+                            "パラメータの独立推定が困難になります。"
+                        ),
+                        recommendation=(
+                            "プロファイルの組み合わせを見直し、"
+                            "2属性の水準が独立に出現するよう設計してください。"
+                        ),
+                    ))
+                elif r > 0.3:
+                    diags.append(Diagnostic(
+                        severity="中",
+                        category=f"correlation_{col1}_{col2}",
+                        message=f"'{col1}' と '{col2}' の相関がやや高いです（|r|={r:.3f}）。",
+                        recommendation="可能であればプロファイルの組み合わせを調整してください。",
+                    ))
+
+    # χ²チェック
+    for _, row in chi2_df.iterrows():
+        ratio = row["χ²/自由度"]
+        a1, a2 = row["属性1"], row["属性2"]
+        if ratio > 1.0:
+            diags.append(Diagnostic(
+                severity="中",
+                category=f"chi2_{a1}_{a2}",
+                message=(
+                    f"'{a1}' と '{a2}' のχ²/自由度={ratio:.3f} > 1.0 で、"
+                    "独立性が低い可能性があります。"
+                ),
+                recommendation="2属性の水準組み合わせが偏っていないか確認してください。",
+            ))
+
+    return diags

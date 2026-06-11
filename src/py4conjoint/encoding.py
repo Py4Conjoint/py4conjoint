@@ -19,12 +19,13 @@ encoding.py
   「評点が低くなりそうな水準」を基準にすると係数の符号が直感的になる。
 * 3水準以上の属性については ``-1, 0, 1`` 形式の効果コーディング
   （``K-1`` 個のダミー変数を生成）に自動拡張する。
-* 生成された列名は ``{属性名}_{インデックス}`` の形式（例：``price_0``, ``camera_0``）。元の列はそのまま残す。
+* 生成される列名はデフォルトで ``{属性名}_{インデックス}`` の形式（例：``price_0``, ``camera_0``）。
+  ``encode()`` の ``suffix_map`` 引数で任意の名前に変更できる。元の列はそのまま残す。
 """
 from __future__ import annotations
 
 import warnings
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 import pandas as pd
 
@@ -38,6 +39,7 @@ def encode(
     reference_levels: Dict[str, object],
     *,
     respondent_encode: Optional[Dict[str, object]] = None,
+    suffix_map: Optional[Dict[str, Union[str, List[str]]]] = None,
     binary_suffix_map: Optional[Dict[str, str]] = None,
     drop_original: bool = False,
     inplace: bool = False,
@@ -87,12 +89,28 @@ def encode(
             respondent_encode = {"gender": ["女性", "female"]}
             # → gender_female 列が追加される（女性→0, 男性→1）
 
+    suffix_map : dict, optional
+        生成する列名のサフィックスを手動指定する辞書。
+        2水準の属性には ``str``、3水準以上の属性には ``List[str]``（非基準水準の数と
+        同じ長さ）を渡す。
+
+        例::
+
+            suffix_map={
+                "price": "low",           # 2水準 → price_low
+                "color": ["red", "blue"], # 3水準（基準=白、非基準=赤・青）→ color_red, color_blue
+            }
+
+        .. note::
+            3水準以上の場合、``List[str]`` の順序はデータ上の水準の出現順
+            （``_unique_levels()`` が返す順序）と一致させてください。
+            ``pd.Series.unique()`` は最初に出現した順を返します。
+
+        省略時は ``{属性名}_0``, ``{属性名}_1``, ... の形式になります。
+
     binary_suffix_map : dict, optional
-        2水準の属性に対して、生成する列名のサフィックス（``+1``側の水準名）を
-        手動指定したい場合に使う。
-        例：``{"price": "low", "os": "apple"}`` とすると ``price_low``, ``os_apple``
-        という列が作られる。
-        省略時は ``{属性名}_0`` の形式になる（例：``price_0``）。
+        **非推奨**。``suffix_map`` を使ってください。
+        後方互換のために残してあります。指定した場合は ``DeprecationWarning`` が出ます。
 
     drop_original : bool, default False
         ``True`` にすると元の属性列（``price`` など）を削除する。
@@ -107,19 +125,23 @@ def encode(
     pd.DataFrame
         符号化された列が追加されたDataFrame。
 
-        2水準の場合：``{属性名}_0`` という列が1つ増える。
+        2水準の場合（``suffix_map`` 未指定時）：``{属性名}_0`` という列が1つ増える。
             例：``price`` ∈ {6, 10}, 基準=10 → ``price_0`` 列（6→1, 10→-1）
 
-        3水準以上の場合：``{属性名}_{0,1,...}`` という列が ``K-1`` 個増える。
+        3水準以上の場合（``suffix_map`` 未指定時）：``{属性名}_{0,1,...}`` という列が ``K-1`` 個増える。
             例：``color`` ∈ {赤, 青, 緑}, 基準=赤 → ``color_0``（青）, ``color_1``（緑）
             （青なら[1,0]、緑なら[0,1]、赤なら[-1,-1]）
 
     Raises
     ------
+    TypeError
+        ``df`` が ``pd.DataFrame`` でない場合。
     ValueError
+        ``reference_levels`` が空または辞書でない場合。
         ``reference_levels`` で指定した属性名が ``df`` にない場合。
         指定した基準水準が実際のデータに存在しない場合。
         属性が1水準しかない場合（分析不能）。
+        ``suffix_map`` のリスト長が非基準水準数と一致しない場合。
 
     Notes
     -----
@@ -144,6 +166,18 @@ def encode(
     ... )
     >>> df_coded.columns.tolist()
     ['rating', 'price', 'os', 'camera', 'price_0', 'os_0', 'camera_0']
+
+    3水準以上の属性にサフィックスを指定する例::
+
+        df_coded = pc.encode(
+            df,
+            reference_levels={"price": 10, "color": "白"},
+            suffix_map={
+                "price": "low",          # 2水準 → price_low
+                "color": ["red", "blue"] # 3水準（基準=白、非基準=赤・青）→ color_red, color_blue
+            },
+        )
+        # → 生成される列: price_low, color_red, color_blue
     """
     # ---------- 入力チェック ----------
     if not isinstance(df, pd.DataFrame):
@@ -157,8 +191,21 @@ def encode(
             "  例: {'price': 10, 'os': 'android', 'camera': '標準'}"
         )
 
+    # binary_suffix_map が渡されたら suffix_map にマージし、非推奨警告を出す
+    if binary_suffix_map is not None:
+        warnings.warn(
+            "binary_suffix_map は非推奨です。suffix_map を使ってください。\n"
+            "例: suffix_map={'price': 'low', 'os': 'apple'}",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        merged = dict(suffix_map) if suffix_map else {}
+        merged.update(binary_suffix_map)
+        suffix_map = merged
+
+    suffix_map = suffix_map or {}
+
     out = df if inplace else df.copy()
-    suffix_map = binary_suffix_map or {}
 
     for attr, ref_level in reference_levels.items():
         # 列の存在確認
@@ -183,10 +230,19 @@ def encode(
             )
 
         # 2水準 と 3水準以上 で分岐（結果はすでに out に書き込み済み）
+        raw_suffix = suffix_map.get(attr)
         if len(levels) == 2:
-            _encode_binary(out, attr, ref_level, suffix_map.get(attr))
+            # 2水準属性に List[str] が渡された場合は1要素のみ許容して str に変換
+            if isinstance(raw_suffix, list):
+                if len(raw_suffix) != 1:
+                    raise ValueError(
+                        f"2水準の属性 '{attr}' の suffix_map には str か1要素のリストを"
+                        f"指定してください。{len(raw_suffix)} 要素のリストが渡されました。"
+                    )
+                raw_suffix = raw_suffix[0]
+            _encode_binary(out, attr, ref_level, raw_suffix)
         else:
-            _encode_multi(out, attr, ref_level)
+            _encode_multi(out, attr, ref_level, raw_suffix)
 
     # ---------- 回答者属性の 0/1 コーディング ----------
     if respondent_encode:
@@ -231,11 +287,14 @@ def encode(
 
     # 後で fit() が再利用できるよう、メタ情報を attrs に保存
     # （df.attrs は pandas のユーザー定義メタデータ機構）
-    existing_meta = dict(out.attrs.get("py4conjoint", {}))
+    # ネストした辞書もコピーし、入力 df の attrs を書き換えないようにする
+    existing_meta = {
+        k: (dict(v) if isinstance(v, dict) else v)
+        for k, v in out.attrs.get("py4conjoint", {}).items()
+    }
     existing_meta.setdefault("reference_levels", {}).update(reference_levels)
-    # binary_suffix_map もあれば保存
-    if binary_suffix_map:
-        existing_meta.setdefault("binary_suffix_map", {}).update(binary_suffix_map)
+    if suffix_map:
+        existing_meta.setdefault("suffix_map", {}).update(suffix_map)
     out.attrs["py4conjoint"] = existing_meta
 
     return out
@@ -252,7 +311,8 @@ def auto_reference_levels(
 
     判定ルール（**推論**ベース。最終的にはユーザーが確認すべき）：
 
-    * 数値列（例：``price``）：**最大値** を基準（高い方を ``-1``）
+    * 数値列かつ ``price_columns`` に含まれる（価格相当列）：**最大値** を基準（高い方を ``-1``）
+    * 数値列かつ ``price_columns`` に含まれない：**最小値** を基準（低い方を ``-1``）
     * カテゴリ列：水準を文字列でソートして **先頭** を基準
 
     自動推測の結果は警告として表示されるので、必ず内容を確認してから使うこと。
@@ -272,6 +332,11 @@ def auto_reference_levels(
     dict
         ``{属性名: 推測された基準水準}`` の辞書。
         そのまま ``encode()`` の ``reference_levels`` に渡せる。
+
+    Raises
+    ------
+    ValueError
+        ``attribute_columns`` に含まれる列名が ``df`` に存在しない場合。
 
     Notes
     -----
@@ -311,7 +376,7 @@ def auto_reference_levels(
 # 内部ヘルパー
 # ---------------------------------------------------------------------------
 
-def _unique_levels(s: pd.Series) -> List:
+def _unique_levels(s: pd.Series) -> List[Any]:
     """
     Series から欠損を除いたユニーク水準のリストを返す。
     数値は数値のまま返し、出現順を保つ。
@@ -320,7 +385,7 @@ def _unique_levels(s: pd.Series) -> List:
 
 
 def _encode_binary(
-    df: pd.DataFrame, attr: str, ref_level, manual_suffix: Optional[str]
+    df: pd.DataFrame, attr: str, ref_level: object, manual_suffix: Optional[str]
 ) -> str:
     """
     2水準の属性を ``-1/1`` に変換する。
@@ -352,27 +417,55 @@ def _encode_binary(
     return new_col
 
 
-def _encode_multi(df: pd.DataFrame, attr: str, ref_level) -> List[str]:
+def _encode_multi(
+    df: pd.DataFrame,
+    attr: str,
+    ref_level: object,
+    suffixes: Optional[Union[str, List[str]]] = None,
+) -> List[str]:
     """
     3水準以上の属性を効果コーディングで K-1 列に展開する。
 
     例：``color`` ∈ {赤, 青, 緑}, 基準=赤
         → ``color_0``（青）: 青→1, 赤→-1, 緑→0
         → ``color_1``（緑）: 緑→1, 赤→-1, 青→0
+
+    ``others`` の順序は ``_unique_levels()`` が返す出現順（``pd.Series.unique()`` ベース）
+    に依存する。``suffixes`` を指定する際はデータ上の水準の出現順を確認してから指定すること。
     """
     levels = _unique_levels(df[attr])
     others = [lv for lv in levels if lv != ref_level]
-    new_cols: List[str] = []
 
+    # suffixes の型を List[str] に統一
+    if suffixes is None:
+        suffix_list = None
+    elif isinstance(suffixes, str):
+        suffix_list = [suffixes]
+    else:
+        suffix_list = list(suffixes)
+
+    # 長さの検証
+    if suffix_list is not None and len(suffix_list) != len(others):
+        raise ValueError(
+            f"属性 '{attr}' の非基準水準は {len(others)} 個ですが、\n"
+            f"suffix_map に {len(suffix_list)} 個のサフィックスが指定されています。\n"
+            f"  非基準水準（基準='{ref_level}' 以外）: {others}\n"
+            f"  指定されたサフィックス: {suffix_list}\n"
+            "  suffix_map の値を非基準水準と同じ順・同じ数のリストにしてください。"
+        )
+
+    new_cols: List[str] = []
     for i, target in enumerate(others):
-        new_col = f"{attr}_{i}"
-        # 各行を target / ref / それ以外 で振り分け
+        suffix = suffix_list[i] if suffix_list else str(i)
+        new_col = f"{attr}_{suffix}"
+
         def _map(v, t=target, r=ref_level):
             if v == t:
                 return 1
             if v == r:
                 return -1
             return 0
+
         df[new_col] = df[attr].map(_map)
         new_cols.append(new_col)
 

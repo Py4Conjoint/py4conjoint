@@ -5,13 +5,16 @@ py4conjoint
 
 主な機能
 --------
-1. **データ作成**: Microsoft Forms / Google Forms の回答ファイルを
+1. **プロファイル設計**: D最適計画法でアンケートプロファイルを選択（:func:`design_profiles`）
+2. **プロファイル数の目安**: 推奨プロファイル数を計算（:func:`suggest_n_profiles`）
+3. **設計品質チェック**: 直交性・バランス・独立性を事前診断（:func:`check_design`）
+4. **データ作成**: Microsoft Forms / Google Forms の回答ファイルを
    long形式DataFrameに変換（:func:`forms_to_conjoint_data`）
-2. **符号化**: ``-1/1`` 効果コーディングを自動化（:func:`encode`）
-3. **回帰分析**: 回帰モデルを推定し、解釈オブジェクトを返す（:func:`fit`）
-4. **解釈**: 相対重要度・WTP・市場シェアの計算（:class:`ConjointResult`）
-5. **可視化**: 棒グラフによる結果の可視化
-6. **落とし穴の自動検出**: データ品質や仮定の問題を警告
+5. **符号化**: ``-1/1`` 効果コーディングを自動化（:func:`encode`）
+6. **回帰分析**: 回帰モデルを推定し、解釈オブジェクトを返す（:func:`fit`）
+7. **解釈**: 重要度・WTP（限界支払意思額）・市場シェアの計算（:class:`ConjointResult`）
+8. **可視化**: 棒グラフによる結果の可視化
+9. **落とし穴の自動検出**: データ品質や仮定の問題を警告
 
 クイックスタート
 ----------------
@@ -49,7 +52,7 @@ py4conjoint
     print(result.summary())
 
     # ---- 5. 解釈 ----
-    result.importance()                         # 相対重要度（合計100%）
+    result.importance()                         # 重要度（合計100%）
     result.wtp()                                # WTP
     result.market_share(products_df)            # 市場シェア予測
     result.plot_importance()                    # 重要度の棒グラフ
@@ -61,27 +64,35 @@ from __future__ import annotations
 # 既存のデータ作成関数（後方互換）
 from ._forms import forms_to_conjoint_data
 
+# 新規追加：プロファイル設計
+from .design import design_profiles, suggest_n_profiles
+
 # 新規追加：符号化
 from .encoding import encode, auto_reference_levels
 
 # 新規追加：回帰分析
-from .analysis import fit, ConjointResult
+from .analysis import fit, ConjointResult, check_design, DesignCheckResult
 
 # 新規追加：可視化
 from .plot import plot_importance, plot_partworth, plot_wtp
 
 
-__version__ = "0.2.2"
+__version__ = "0.3.0"
 
 __all__ = [
     # データ作成
     "forms_to_conjoint_data",
+    # プロファイル設計
+    "design_profiles",
+    "suggest_n_profiles",
     # 符号化
     "encode",
     "auto_reference_levels",
     # 分析
     "fit",
     "ConjointResult",
+    "check_design",
+    "DesignCheckResult",
     # 可視化
     "plot_importance",
     "plot_partworth",

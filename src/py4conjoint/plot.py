@@ -5,9 +5,9 @@ plot.py
 
 3種類のグラフを提供：
 
-* :func:`plot_importance` … 属性の相対重要度（合計100%の棒グラフ）
+* :func:`plot_importance` … 属性の重要度（合計100%の棒グラフ）
 * :func:`plot_partworth` … 各水準の部分効用（パートワース）
-* :func:`plot_wtp` … 各属性のWTP（支払意思額）
+* :func:`plot_wtp` … 各属性のWTP（限界支払意思額）
 
 すべて matplotlib で描画する。日本語フォントは自動設定を試みる。
 """
@@ -82,13 +82,13 @@ def plot_importance(
     result: "ConjointResult",
     *,
     ax=None,
-    title: str = "属性の相対重要度",
+    title: str = "属性の重要度",
     color: str = "#4C78A8",
     show_values: bool = True,
     sort: bool = True,
 ):
     """
-    各属性の **相対重要度** を棒グラフで描画する。
+    各属性の **重要度** を棒グラフで描画する。
 
     Parameters
     ----------
@@ -116,18 +116,18 @@ def plot_importance(
     _ensure_japanese_font()
     imp = result.importance(as_percent=True)
     if sort:
-        imp = imp.sort_values("importance", ascending=True)
+        imp = imp.sort_values("重要度", ascending=True)
 
     if ax is None:
         fig, ax = plt.subplots(figsize=(7, max(2.5, 0.6 * len(imp) + 1.5)))
 
-    ax.barh(imp.index, imp["importance"], color=color)
-    ax.set_xlabel("相対重要度（%）")
+    ax.barh(imp.index, imp["重要度"], color=color)
+    ax.set_xlabel("重要度（%）")
     ax.set_title(title)
-    ax.set_xlim(0, max(100, imp["importance"].max() * 1.15))
+    ax.set_xlim(0, max(100, imp["重要度"].max() * 1.15))
 
     if show_values:
-        for y, v in enumerate(imp["importance"]):
+        for y, v in enumerate(imp["重要度"]):
             ax.text(v + 1.0, y, f"{v:.1f}%", va="center", fontsize=10)
 
     ax.spines["top"].set_visible(False)
@@ -224,7 +224,11 @@ def plot_wtp(
     price_unit: Optional[str] = None,
 ):
     """
-    各非価格属性の **WTP（支払意思額）** を棒グラフで描画する。
+    各非価格属性の **WTP（限界支払意思額）** を棒グラフで描画する。
+
+    ここでの WTP は厳密には限界支払意思額（MWTP）であり、
+    製品全体に対する支払上限額ではない。
+    詳細は :meth:`py4conjoint.analysis.ConjointResult.wtp` の「定義」を参照。
 
     Parameters
     ----------
@@ -246,21 +250,21 @@ def plot_wtp(
     _ensure_japanese_font()
     wtp = result.wtp()
     if sort:
-        wtp = wtp.sort_values("支払意思額")
+        wtp = wtp.sort_values("限界支払意思額")
 
     if ax is None:
         fig, ax = plt.subplots(figsize=(7, max(2.5, 0.5 * len(wtp) + 1.5)))
 
-    ax.barh(wtp.index, wtp["支払意思額"], color=color)
+    ax.barh(wtp.index, wtp["限界支払意思額"], color=color)
     ax.axvline(0, color="gray", linewidth=0.8)
 
     label_unit = f"（{price_unit}）" if price_unit else ""
-    ax.set_xlabel(f"WTP（支払意思額）{label_unit}")
-    ax.set_title(title or "属性のWTP（支払意思額）")
+    ax.set_xlabel(f"限界支払意思額{label_unit}")
+    ax.set_title(title or "属性の限界支払意思額")
 
     if show_values:
-        max_abs = max(abs(wtp["支払意思額"]).max(), 1e-9)
-        for y, v in enumerate(wtp["支払意思額"]):
+        max_abs = max(abs(wtp["限界支払意思額"]).max(), 1e-9)
+        for y, v in enumerate(wtp["限界支払意思額"]):
             offset = 0.02 * max_abs
             x = v + offset if v >= 0 else v - offset
             ha = "left" if v >= 0 else "right"

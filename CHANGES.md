@@ -4,6 +4,47 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [0.3.0] - 2026-06-02
+
+### Added
+- `design_profiles()` 関数を追加（`design.py` 新規）。D最適計画法（Fedorov交換アルゴリズム）により全水準の完全交差からM個のプロファイルを選択する。任意の属性数・任意の水準数・混在水準数に対応。numpy のみで実装（追加依存なし）。
+- `suggest_n_profiles()` 関数を追加（`design.py`）。属性・水準数と予定回答者数から、統計的最低限・Orme の経験則・観測数条件に基づく推奨プロファイル数を計算する。
+- `fit()` に `respondent_id_col`・`cluster_se` 引数を追加。回答者ID列がある場合、デフォルトで**回答者IDによるクラスタロバスト標準誤差**を使用する（同一回答者の複数回答は独立でないため、通常のOLS標準誤差ではp値が過小になる。係数の推定値は変わらない）。`summary()` に標準誤差の種別を表示。
+- `independence_assumed` 警告（重大度：中）を追加。回答者ID列が見つからず観測の独立性を仮定した標準誤差を使っている場合に通知する。
+- `importance()` の docstring に、重要度が調査で選んだ水準レンジに依存する相対指標である旨の注記を追加。
+- `encode()` に `suffix_map` 引数を追加。2水準には `str`、3水準以上には `List[str]` を渡すことで列名サフィックスを指定可能。
+- `check_design()` 関数と `DesignCheckResult` クラスを追加。アンケート実施前にプロファイルの直交性・バランス・独立性を診断する（scipy不要）。
+- `wtp()` の価格3水準以上対応。線形近似（仮定）を用いてWTPを計算し、`wtp_price_linear_approx` 警告を自動追加。
+- `unit_rating_money()` の価格3水準以上対応。
+
+### Changed
+- `binary_suffix_map` 引数を非推奨化（`DeprecationWarning` を出して `suffix_map` への移行を促す）。後方互換のため引数は残す。
+- `_encode_multi()` にサフィックス引数を追加。
+- `wtp()`・`plot_wtp()` のドキュメントに、計算値が厳密には限界支払意思額（MWTP：他属性一定のまま1属性を変えるときの追加支払額＝属性と価格の限界代替率）であり、製品全体に対する支払上限額（総WTP）ではないことを明記。
+- `wtp()` の列名を `支払意思額` → `限界支払意思額` に変更（MWTPであることを明確化）。`plot_wtp()` の軸ラベル・タイトルも追従。
+- `importance()` の列名を `range` → `効用範囲`、`importance` → `重要度` に変更（`wtp()` の列名と同様に日本語化）。
+- `plot_importance()` のデフォルトタイトル・X軸ラベルを「属性の重要度」「重要度（%）」に、`plot_wtp()` を「属性の限界支払意思額」「限界支払意思額」に変更。
+
+### Fixed
+- `wtp()`：3水準以上の非価格属性のWTPが定義（基準水準からの効用差の金額換算）と一致しない値を返すバグを修正。属性ごとに `wtp_k = (b_k + Σb_j) × wtp_price_factor / 2` で計算するように変更。2水準属性の結果は従来と同一。
+- `suggest_n_profiles()`：`max_burden` がパラメータ数 p を下回る場合に、回帰分析が実行不能な推奨値（< p）を警告なしで返すバグを修正。推奨値を p まで引き上げ、`UserWarning` を出すように変更。
+- `wtp()`：3水準以上の価格では先頭の符号化列の p値のみで `price_insignificant` を判定していたのを、全価格係数の同時F検定の p値（`attrs["p_price"]`）に変更。2水準価格は従来どおり t 検定。
+- `encode()`：attrs のネスト辞書（`reference_levels` 等）が入力 DataFrame と共有され、encode 済みデータを再 encode すると入力側の attrs まで書き換わる副作用を修正。
+- `fit()`：符号化列の自動検出を改善。属性名が別の列名の接頭辞になっている場合の誤検出・重複登録を防止し、効果コーディング済み（-1/1 を含む）の列のみを採用するように変更（0/1 の回答者属性列は `encoded_columns` で明示指定する）。
+- `fit(formula=...)`：formula 指定時に説明変数の自動検出と食い違い `importance()`/`wtp()` が `KeyError` になる問題を修正。被説明変数・説明変数を formula から取得するように変更。
+- ビルド要件を `setuptools>=77` に引き上げ（PEP 639 の SPDX ライセンス文字列 `license = "MIT"` に必要）。
+- `test_e2e_real_data` が環境固有の存在しないパス（`/mnt/user-data/uploads/test.xlsx`）を参照して常にスキップされていた問題を修正。リポジトリ内の `examples/responses_os.csv` を使うように変更。
+
+---
+
+## [0.2.3] - 2026-05-31
+
+### Fixed
+- `wtp()` を複数回呼んだとき `wtp_extrapolation` 警告が重複登録されるバグを修正
+- `summary()` の係数表で全角文字を含む変数名があっても列がズレないよう修正
+
+---
+
 ## [0.2.2] - 2026-05-31
 
 ### Changed

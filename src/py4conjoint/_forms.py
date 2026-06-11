@@ -342,8 +342,10 @@ def _pick_rating_cols(
     評点列を candidates から n_profiles 列分選ぶ。
 
     優先順位：
-    1. 候補列の中で数値型の列が n_profiles 個ある → それを採用
-    2. 候補列の右端 n_profiles 列を採用（数値変換できるか確認）
+    1. 数値型（または数値変換可能）の候補列が n_profiles 個以上ある
+       → そのうち右端の n_profiles 列を採用
+    2. 候補列全体が n_profiles 個以上ある
+       → 右端の n_profiles 列を採用（数値変換できるか確認）
     3. 上記でも取得できなければ ValueError
     """
     numeric_candidates = [
@@ -452,11 +454,11 @@ def _check_attributes(
         warnings.warn(
             "属性が1つしかありません。\n"
             "属性が1つの場合、複数属性間のトレードオフが測れないため、\n"
-            "支払意思額（WTP）の計算ができません。\n"
+            "限界支払意思額（WTP）の計算ができません。\n"
             "コンジョイント分析の導入として使う場合は問題ありませんが、\n"
             "本分析では属性を2つ以上にすることを推奨します。",
             UserWarning,
-            stacklevel=4,
+            stacklevel=3,
         )
 
     for i, attr_dict in enumerate(attributes):

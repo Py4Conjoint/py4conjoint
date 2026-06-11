@@ -28,7 +28,9 @@ pyrightconfig.json
 Thumbs.db
 
 # etc
+.gitignore
 .claude/
+examples/tmp/
 tests/__pycache__
 test_drive/
 tmp/

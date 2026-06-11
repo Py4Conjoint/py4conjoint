@@ -58,11 +58,14 @@ df_coded = pc.encode(
         "os":     "android",
         "camera": "標準"
     },
-    binary_suffix_map = {
+    suffix_map = {
         "price":  "low",
         "os":     "apple",
         "camera": "high"
     },
+    respondent_encode = {
+        "gender": ["女性", "male"]
+    }
 )
 ```
 
@@ -70,7 +73,7 @@ df_coded = pc.encode(
 
 ```python
 result = pc.fit(df_coded)
-print(result.summary())
+print(result)
 ```
 
 ```
@@ -97,20 +100,20 @@ print(result.summary())
 ### 4. 結果を解釈する
 
 ```python
-# 相対重要度（合計100%）
+# 重要度（合計100%）
 result.importance()
-#              range  importance
+#            効用範囲   重要度
 # 属性
-# price       2.5167      45.62
-# os          1.8167      32.94
-# camera      1.1833      21.44
+# price       2.5167   45.62
+# os          1.8167   32.94
+# camera      1.1833   21.44
 
-# WTP（支払意思額）
+# WTP（限界支払意思額）
 result.wtp()
-#                      係数  支払意思額
+#                      係数  限界支払意思額
 # 属性（符号化列名）
-# os_apple           0.9083     2.8874
-# camera_high        0.5917     1.8805
+# os_apple           0.9083         2.8874
+# camera_high        0.5917         1.8805
 
 # 評点1点の金額換算
 result.unit_rating_money()
@@ -131,7 +134,7 @@ result.market_share(products)
 ### 5. 可視化する
 
 ```python
-result.plot_importance()   # 相対重要度の棒グラフ
+result.plot_importance()   # 重要度の棒グラフ
 result.plot_partworth()    # 部分効用の棒グラフ
 result.plot_wtp(price_unit="万円")  # WTPの棒グラフ
 ```
@@ -146,11 +149,11 @@ result.plot_wtp(price_unit="万円")  # WTPの棒グラフ
 | `fit()` | OLS 回帰を実行し `ConjointResult` を返す |
 | `result.summary()` | 係数表・R²・落とし穴チェックの和文サマリー |
 | `result.warnings()` | 落とし穴の一覧（severity / category でフィルタ可） |
-| `result.importance()` | 各属性の相対重要度（合計100%） |
-| `result.wtp()` | 各属性の WTP（支払意思額） |
+| `result.importance()` | 各属性の重要度（合計100%） |
+| `result.wtp()` | 各属性の WTP（限界支払意思額） |
 | `result.unit_rating_money()` | 評点1点の金額換算（float） |
 | `result.market_share()` | 市場シェア予測（logit / max） |
-| `result.plot_importance()` | 相対重要度の棒グラフ |
+| `result.plot_importance()` | 重要度の棒グラフ |
 | `result.plot_partworth()` | 部分効用（パートワース）の棒グラフ |
 | `result.plot_wtp()` | WTP の棒グラフ |
 
