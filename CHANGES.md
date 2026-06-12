@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [0.4.0] - Unreleased
+
+### Added
+- `choice/` サブパッケージを追加（選択型コンジョイント分析・CBC）。条件付きロジット（conditional logit）を `scipy.optimize` による自前実装で推定する（教育目的のため透明性優先）。`fit()`・`encode()`・`ChoiceConjointResult`（`summary()` / `importance()` / `wtp()` / `market_share()` / `warnings()`）を提供し、メソッド名・日本語列名は `rating` 版と統一。
+- `scipy>=1.8` を明示的依存に追加（`choice/` の最尤推定に使用。従来も statsmodels 経由で間接的に必要だった）。
+
+### Changed
+- 既存モジュール（`_forms.py`・`design.py`・`encoding.py`・`analysis.py`・`plot.py`）を `rating/` サブパッケージへ移動。評点型コンジョイント分析は `import py4conjoint.rating as pcr` で利用する。
+
+### Removed
+- トップレベルAPI（`pc.fit`・`pc.encode` 等）を廃止。旧API名へアクセスすると日本語の `AttributeError` で `py4conjoint.rating` への移行を案内する（`__version__` などの正当な属性は従来どおり）。
+
+---
+
 ## [0.3.0] - 2026-06-02
 
 ### Added
