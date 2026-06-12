@@ -908,7 +908,7 @@ def test_design_profiles_d_efficiency_better_than_random():
 
     # ランダム選択を 30 回試行し、中央値と比較
     rng = np.random.default_rng(99)
-    from py4conjoint.design import _build_effect_matrix
+    from py4conjoint.rating.design import _build_effect_matrix
     full = pd.DataFrame(
         [dict(zip(ATTR_LEVELS.keys(), c))
          for c in itertools.product(*ATTR_LEVELS.values())]

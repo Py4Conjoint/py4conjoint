@@ -62,19 +62,19 @@ py4conjoint
 from __future__ import annotations
 
 # 既存のデータ作成関数（後方互換）
-from ._forms import forms_to_conjoint_data
+from .rating._forms import forms_to_conjoint_data
 
 # 新規追加：プロファイル設計
-from .design import design_profiles, suggest_n_profiles
+from .rating.design import design_profiles, suggest_n_profiles
 
 # 新規追加：符号化
-from .encoding import encode, auto_reference_levels
+from .rating.encoding import encode, auto_reference_levels
 
 # 新規追加：回帰分析
-from .analysis import fit, ConjointResult, check_design, DesignCheckResult
+from .rating.analysis import fit, ConjointResult, check_design, DesignCheckResult
 
 # 新規追加：可視化
-from .plot import plot_importance, plot_partworth, plot_wtp
+from .rating.plot import plot_importance, plot_partworth, plot_wtp
 
 
 __version__ = "0.3.0"
