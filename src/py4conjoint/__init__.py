@@ -1,85 +1,35 @@
 """
 py4conjoint
 ===========
-評点型コンジョイント分析を **Python初心者でも直感的に** 行えるパッケージ。
+コンジョイント分析を **Python初心者でも直感的に** 行えるパッケージ。
 
-主な機能
---------
-1. **プロファイル設計**: D最適計画法でアンケートプロファイルを選択（:func:`design_profiles`）
-2. **プロファイル数の目安**: 推奨プロファイル数を計算（:func:`suggest_n_profiles`）
-3. **設計品質チェック**: 直交性・バランス・独立性を事前診断（:func:`check_design`）
-4. **データ作成**: Microsoft Forms / Google Forms の回答ファイルを
-   long形式DataFrameに変換（:func:`forms_to_conjoint_data`）
-5. **符号化**: ``-1/1`` 効果コーディングを自動化（:func:`encode`）
-6. **回帰分析**: 回帰モデルを推定し、解釈オブジェクトを返す（:func:`fit`）
-7. **解釈**: 重要度・WTP（限界支払意思額）・市場シェアの計算（:class:`ConjointResult`）
-8. **可視化**: 棒グラフによる結果の可視化
-9. **落とし穴の自動検出**: データ品質や仮定の問題を警告
+v0.4.0 から、機能はサブパッケージとして提供されます：
+
+- :mod:`py4conjoint.rating` — 評点型コンジョイント分析
+- :mod:`py4conjoint.choice` — 選択型コンジョイント分析（CBC）
 
 クイックスタート
 ----------------
 .. code-block:: python
 
-    import pandas as pd
-    import py4conjoint as pc
+    import py4conjoint.rating as pcr
 
-    # ---- 1. アンケートのプロファイル設計 ----
-    cards = pd.DataFrame({
-        "price":  [6, 10, 6, 10],
-        "os":     ["android", "apple", "apple", "android"],
-        "camera": ["標準", "標準", "高性能", "高性能"],
-    }, index=["P1", "P2", "P3", "P4"])
-
-    # ---- 2. Forms 回答ファイルを分析用データに変換 ----
-    df = pc.forms_to_conjoint_data(
-        responses_file="responses.xlsx",
-        n_profiles=4,
-        attributes=cards,
-    )
-
-    # ---- 3. 符号化（基準水準を指定するだけ）----
-    df_coded = pc.encode(
-        df,
-        reference_levels={
-            "price":  10,         # 高い方を基準
-            "os":     "android",
-            "camera": "標準",
-        },
-    )
-
-    # ---- 4. 回帰分析 ----
-    result = pc.fit(df_coded)
+    df_coded = pcr.encode(df, reference_levels={...})
+    result = pcr.fit(df_coded)
     print(result.summary())
 
-    # ---- 5. 解釈 ----
-    result.importance()                         # 重要度（合計100%）
-    result.wtp()                                # WTP
-    result.market_share(products_df)            # 市場シェア予測
-    result.plot_importance()                    # 重要度の棒グラフ
-    result.plot_partworth()                     # 部分効用の棒グラフ
-    result.plot_wtp(price_unit="万円")          # WTPの棒グラフ
+旧バージョン（v0.3.x 以前）のトップレベルAPI（``pc.fit`` など）は
+v0.4.0 で廃止されました。``import py4conjoint.rating as pcr`` を
+使ってください。
 """
 from __future__ import annotations
 
-# 既存のデータ作成関数（後方互換）
-from .rating._forms import forms_to_conjoint_data
+import importlib
 
-# 新規追加：プロファイル設計
-from .rating.design import design_profiles, suggest_n_profiles
+__version__ = "0.4.0a1"
 
-# 新規追加：符号化
-from .rating.encoding import encode, auto_reference_levels
-
-# 新規追加：回帰分析
-from .rating.analysis import fit, ConjointResult, check_design, DesignCheckResult
-
-# 新規追加：可視化
-from .rating.plot import plot_importance, plot_partworth, plot_wtp
-
-
-__version__ = "0.3.0"
-
-__all__ = [
+# v0.3.x までトップレベルに存在した旧API名
+_REMOVED_API = frozenset({
     # データ作成
     "forms_to_conjoint_data",
     # プロファイル設計
@@ -97,4 +47,17 @@ __all__ = [
     "plot_importance",
     "plot_partworth",
     "plot_wtp",
-]
+})
+
+_SUBPACKAGES = ("rating", "choice")
+
+
+def __getattr__(name: str):
+    if name in _SUBPACKAGES:
+        return importlib.import_module(f".{name}", __name__)
+    if name in _REMOVED_API:
+        raise AttributeError(
+            f"py4conjoint.{name} は v0.4.0 で廃止されました。"
+            "`import py4conjoint.rating as pcr` を使ってください。"
+        )
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

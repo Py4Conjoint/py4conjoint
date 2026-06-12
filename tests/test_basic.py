@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 import numpy as np
 import pandas as pd
-import py4conjoint as pc
+import py4conjoint.rating as pc
 
 
 def make_synthetic_data(seed: int = 0, n_resp: int = 30) -> pd.DataFrame:
