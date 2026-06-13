@@ -248,7 +248,9 @@ def plot_wtp(
     matplotlib.axes.Axes
     """
     _ensure_japanese_font()
-    wtp = result.wtp()
+    # 棒グラフは属性ごとに1本にするため、線形近似（単一値）の WTP を使う。
+    # 価格区間ごとの WTP は result.wtp() で表として確認できる。
+    wtp = result.wtp(method="linear")
     if sort:
         wtp = wtp.sort_values("限界支払意思額")
 

@@ -16,15 +16,14 @@ analysis.py
 """
 from __future__ import annotations
 
+import unicodedata
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set, Union
-import unicodedata
 
 import numpy as np
 import pandas as pd
 import statsmodels.formula.api as smf
 from statsmodels.regression.linear_model import RegressionResults
-
 
 # ---------------------------------------------------------------------------
 # 警告（落とし穴）の構造化表現
@@ -840,7 +839,13 @@ class ConjointResult:
 
     # ---- WTP（限界支払意思額） ----------------------------------------------
 
-    def wtp(self, *, price_col: Optional[str] = None) -> pd.DataFrame:
+    def wtp(
+        self,
+        *,
+        price_col: Optional[str] = None,
+        method: str = "segment",
+        price_segment: Optional[object] = None,
+    ) -> pd.DataFrame:
         """
         各非価格属性の **WTP（限界支払意思額、Marginal Willingness to Pay）** を計算する。
 
@@ -865,11 +870,20 @@ class ConjointResult:
 
         ``low_price - high_price`` は負の値なので、マイナスを付けて正のスケール係数にする。
 
-        **3水準以上の価格の場合**
+        **3水準以上の価格の場合（区間別 WTP）**
 
-        価格水準と部分効用を線形近似（``np.polyfit``）し、
-        傾き ``slope`` から ``wtp_price_factor = -2 / slope`` を求める。
-        ``wtp_price_linear_approx`` 警告が自動追加される（重大度：中）。
+        価格を効果コーディングすると各価格水準の効用が独立に推定される。
+        これを活かし、``method="segment"``（デフォルト）では **隣接する
+        価格水準の区間ごと** に別々の傾き（価格感応度）で WTP を計算する。
+        価格帯によって価格感応度が変わるため、WTP も区間ごとに変わるのが
+        自然である。戻り値には ``価格区間`` 列が付き、属性 × 区間の行が
+        出力される。
+
+        ``method="linear"`` を指定すると、価格水準と部分効用を線形近似
+        （``np.polyfit``）した1本の傾きから WTP を計算する（従来方式・
+        教材用）。このとき ``wtp_price_linear_approx`` 警告が追加される
+        （重大度：中）。価格が2水準のときは区間が1つだけなので、
+        ``method`` によらず単一値を返す。
 
         **非価格属性のWTP（水準数によらず共通）**
 
@@ -888,7 +902,15 @@ class ConjointResult:
         Parameters
         ----------
         price_col : str, optional
-            価格列名。``fit`` で設定した値を上書きしたい場合に使う。
+            価格の数値列名。``fit`` で設定した値を上書きしたい場合に使う。
+            ``price_col`` には符号化列（``price_0`` など）ではなく、
+            元の数値列名（例：``"price"``）を渡すこと。
+        method : {"segment", "linear"}, default "segment"
+            価格3水準以上のとき、区間別（``"segment"``）で計算するか
+            線形近似1本（``"linear"``）で計算するか。上記参照。
+        price_segment : str または (low, high), optional
+            特定の価格区間の WTP だけを取り出したいときに指定する。
+            ラベル文字列（例：``"6〜8"``）または ``(6, 8)`` のタプル。
 
         Returns
         -------
@@ -896,6 +918,8 @@ class ConjointResult:
             列：``係数``, ``限界支払意思額``（価格と同じ単位）。
             インデックスは非価格属性の符号化列名。
             3水準以上の非価格属性には K-1 行が出力される。
+            区間別（価格3水準以上 × ``method="segment"``）のときは先頭に
+            ``価格区間`` 列が付く。
 
         Raises
         ------
@@ -916,7 +940,18 @@ class ConjointResult:
           仮定している。この仮定の下では補償変分と等価変分が一致し、
           MWTP = 効用差 ÷ 貨幣の限界効用 となる。
         """
-        price_col = price_col or self.price_col
+        price_col = price_col if price_col is not None else self.price_col
+        if price_col is None:
+            raise ValueError(
+                "価格列が指定されていません。\n"
+                "  fit() の price_col 引数か、wtp() の price_col 引数で\n"
+                "  価格の数値列名（例: 'price'）を指定してください。"
+            )
+        if method not in ("segment", "linear"):
+            raise ValueError(
+                f"method='{method}' は無効です。\n"
+                "  'segment'（区間別）または 'linear'（線形近似）を指定してください。"
+            )
         if price_col not in self.df.columns:
             raise ValueError(
                 f"価格列 '{price_col}' が DataFrame にありません。\n"
@@ -924,7 +959,7 @@ class ConjointResult:
                 f"  正しい列名を指定してください。"
             )
 
-        # 価格の符号化列を特定
+        # 価格の符号化列を構成的に特定（前方一致は使わない）
         price_encoded = self._find_encoded_for(price_col)
         if price_encoded is None:
             raise ValueError(
@@ -935,9 +970,12 @@ class ConjointResult:
         price_enc_col = price_encoded[0]
         p_price = self._price_pvalue(price_encoded)
 
-        # 価格の元の水準を取得
-        price_levels = sorted(self.df[price_col].dropna().unique().tolist())
-        low_price, high_price = price_levels[0], price_levels[-1]
+        # 価格水準ごとの部分効用を復元（効果コーディング：基準水準 = -Σb）
+        levels, util = _price_level_utility_map(
+            self.df, self.params, price_col, price_encoded, base_zero=False
+        )
+        n_levels = len(levels)
+        low_price, high_price = levels[0], levels[-1]
         price_range = float(high_price - low_price)
 
         # ---- 警告①：価格係数の有意性（p ≥ 0.10） ----
@@ -963,16 +1001,19 @@ class ConjointResult:
                 )
             )
 
-        # WTP計算のスケール係数
-        # WTP_attr = wtp_price_factor * b_attr として使う。
+        # 線形近似のスケール係数（attrs と method="linear" 用）。
         # ※「評点1点の金額」は unit_rating_money() = wtp_price_factor / 2 。
-        if len(price_levels) == 2:
+        if n_levels == 2:
             b_price = float(self.params[price_enc_col])
             # -(low_price - high_price) / b_price = (high - low) / b_price
             wtp_price_factor = -(low_price - high_price) / b_price
         else:
-            # 3水準以上: 線形近似で価格感度を推定
             wtp_price_factor = self._calc_price_sensitivity(price_col)
+
+        # 隣接する価格水準ごとの区間（傾き）を作る
+        segs = _price_segments_from_utilities(levels, util)
+        multi_segment = (method == "segment") and (n_levels >= 3)
+        if method == "linear" and n_levels >= 3:
             cat_key = "wtp_price_linear_approx"
             if cat_key not in already_cats:
                 self._diagnostics.append(
@@ -980,38 +1021,59 @@ class ConjointResult:
                         severity="中",
                         category="wtp_price_linear_approx",
                         message=(
-                            f"価格が {len(price_levels)} 水準あるため、"
+                            f"価格が {n_levels} 水準ありますが、"
                             "価格効用が線形であると仮定してWTPを計算しています。"
                         ),
                         recommendation=(
                             "価格効用が等間隔でない場合は近似誤差が生じます。"
-                            "result.warnings() で詳細を確認してください。"
+                            "method='segment' なら価格区間ごとの WTP を確認できます。"
                         ),
                     )
                 )
+        elif multi_segment and price_segment is not None:
+            segs = _select_price_segment(segs, price_segment)
 
-        # 価格属性の符号化列（2水準なら1列、3水準以上なら複数列）をすべて除外し、
-        # 属性ごとにグルーピングして「基準水準からの効用差」を金額換算する。
+        # 価格属性の符号化列を除外し、属性ごとに「基準水準からの効用差」を金額換算。
         # 効果コーディングでは基準水準の効用 = -Σ b_j なので、
-        # 基準→水準k の効用差 = b_k + Σ b_j（2水準属性では 2b に一致し、
-        # 従来式 wtp_price_factor × b と同値）。
+        # 基準→水準k の効用差 = b_k + Σ b_j（2水準属性では 2b に一致する）。
         price_encoded_set = set(price_encoded)
-        money_per_utility = wtp_price_factor / 2.0  # 評点1点あたりの金額
         groups = _group_columns_by_attribute(
             self.encoded_columns, list(self.reference_levels.keys())
         )
         rows = []
-        for attr, cols in groups.items():
-            if all(c in price_encoded_set for c in cols):
-                continue  # 価格属性はWTP出力に含めない
-            bs = [float(self.params[c]) for c in cols]
-            sum_b = sum(bs)
-            for col, b in zip(cols, bs):
-                wtp_value = (b + sum_b) * money_per_utility
-                rows.append({"variable": col, "係数": b, "限界支払意思額": wtp_value})
+        if multi_segment:
+            for seg in segs:
+                money_per_utility = -1.0 / seg["slope"]
+                for attr, cols in groups.items():
+                    if all(c in price_encoded_set for c in cols):
+                        continue
+                    bs = [float(self.params[c]) for c in cols]
+                    sum_b = sum(bs)
+                    for col, b in zip(cols, bs):
+                        rows.append({
+                            "variable": col,
+                            "価格区間": seg["label"],
+                            "係数": b,
+                            "限界支払意思額": (b + sum_b) * money_per_utility,
+                        })
+        else:
+            # 単一値（2水準価格、または method="linear"）。
+            money_per_utility = wtp_price_factor / 2.0  # 評点1点あたりの金額
+            for attr, cols in groups.items():
+                if all(c in price_encoded_set for c in cols):
+                    continue  # 価格属性はWTP出力に含めない
+                bs = [float(self.params[c]) for c in cols]
+                sum_b = sum(bs)
+                for col, b in zip(cols, bs):
+                    rows.append({
+                        "variable": col, "係数": b,
+                        "限界支払意思額": (b + sum_b) * money_per_utility,
+                    })
 
         out = pd.DataFrame(rows).set_index("variable")
         out.index.name = "属性（符号化列名）"
+        if multi_segment:
+            out = out[["価格区間", "係数", "限界支払意思額"]]
 
         # ---- 警告②：WTP が価格レンジ × 2 を超える（外挿） ----
         for _, row in out.iterrows():
@@ -1047,6 +1109,7 @@ class ConjointResult:
         out.attrs["price_high"] = high_price
         out.attrs["price_range"] = price_range
         out.attrs["p_price"] = p_price
+        out.attrs["method"] = method
         return out
 
     def unit_rating_money(self, *, price_col: Optional[str] = None) -> float:
@@ -1284,14 +1347,37 @@ class ConjointResult:
 
     def _find_encoded_for(self, original_col: str) -> Optional[List[str]]:
         """
-        元の属性列名に対応する符号化列を見つける。
+        元の属性列名に対応する符号化列を、encode の命名規則から
+        **構成的に** 特定する。
 
-        ``{original_col}_`` で始まるすべての符号化列を返す。
-        デフォルト命名（``{attr}_0``, ``{attr}_1`` ...）でも
-        ``suffix_map`` 指定時のカスタム名でも機能する。
+        数値列の水準数（K）から非基準水準の数（K-1）を求め、
+        ``encode()`` の命名規則（デフォルトは ``{attr}_0``, ``{attr}_1`` ...、
+        ``suffix_map`` 指定時はそのサフィックス）から想定される列名を構成し、
+        ``encoded_columns`` 内の該当列だけを返す。
+
+        ``startswith`` による前方一致は使わないため、``price_range_high``
+        のように接頭辞が紛らわしい別属性の列を誤検出しない。
         """
-        prefix = f"{original_col}_"
-        cols = [c for c in self.encoded_columns if c.startswith(prefix)]
+        if original_col not in self.df.columns:
+            return None
+        levels = list(pd.Series(self.df[original_col].dropna().unique()))
+        n_others = len(levels) - 1
+        if n_others < 1:
+            return None
+        meta = (
+            self.df.attrs.get("py4conjoint", {}) if hasattr(self.df, "attrs") else {}
+        )
+        suffix_map = meta.get("suffix_map") or {}
+        raw = suffix_map.get(original_col)
+        if raw is None:
+            suffixes = [str(i) for i in range(n_others)]
+        elif isinstance(raw, str):
+            suffixes = [raw]
+        else:
+            suffixes = [str(s) for s in raw]
+        names = [f"{original_col}_{s}" for s in suffixes]
+        encoded_set = set(self.encoded_columns)
+        cols = [n for n in names if n in encoded_set]
         return cols if cols else None
 
     def _run_diagnostics(self) -> None:
@@ -1630,6 +1716,105 @@ def _group_columns_by_attribute(
         attr = c.split("_")[0]
         groups.setdefault(attr, []).append(c)
     return groups
+
+
+# ---------------------------------------------------------------------------
+# 区間別 WTP の共通ヘルパー（rating / choice で共通利用）
+# ---------------------------------------------------------------------------
+
+def _format_price_level(x: float) -> str:
+    """価格水準を表示用に整形する（整数なら小数点を出さない）。"""
+    xf = float(x)
+    return str(int(xf)) if xf == int(xf) else f"{xf:g}"
+
+
+def _price_level_utility_map(
+    df: pd.DataFrame,
+    params: pd.Series,
+    price_col: str,
+    price_encoded: List[str],
+    *,
+    base_zero: bool,
+) -> "tuple[List[float], Dict[float, float]]":
+    """
+    価格の符号化列から、各価格水準の部分効用を復元する。
+
+    各符号化列が「どの価格水準のダミーか」は、その列が ``1`` になっている
+    行の ``price_col`` の値から **データに基づいて** 特定する
+    （列名の前方一致には依存しない）。
+
+    Parameters
+    ----------
+    base_zero : bool
+        基準水準の効用を 0 とみなすか（choice のダミーコーディング）。
+        ``False`` なら基準水準の効用 = ``-Σ係数``（rating の効果コーディング）。
+
+    Returns
+    -------
+    (levels, util)
+        ``levels``：昇順にソートした価格水準のリスト。
+        ``util``：``{価格水準: 部分効用}`` の辞書（基準水準も含む）。
+    """
+    util: Dict[float, float] = {}
+    coefs: List[float] = []
+    for c in price_encoded:
+        coef = float(params[c])
+        coefs.append(coef)
+        rows_1 = df[df[c] == 1]
+        if len(rows_1) > 0:
+            util[float(rows_1[price_col].iloc[0])] = coef
+    levels = sorted(float(x) for x in df[price_col].dropna().unique())
+    base_util = 0.0 if base_zero else -float(sum(coefs))
+    for lv in levels:
+        if lv not in util:
+            util[lv] = base_util
+    return levels, util
+
+
+def _price_segments_from_utilities(
+    levels: List[float], util: Dict[float, float]
+) -> List[Dict[str, Any]]:
+    """
+    昇順の価格水準と各水準の効用から、隣接する価格区間ごとの情報を返す。
+
+    各区間の傾き ``slope = (u(high) − u(low)) / (high − low)``
+    （通常財では負）。``money_per_utility = −1 / slope`` は
+    「効用1単位あたりの金額」（通常財では正）を表す。
+    """
+    segs: List[Dict[str, Any]] = []
+    for lo, hi in zip(levels[:-1], levels[1:]):
+        span = hi - lo
+        slope = (util[hi] - util[lo]) / span if span != 0 else float("nan")
+        segs.append({
+            "low": lo,
+            "high": hi,
+            "label": f"{_format_price_level(lo)}〜{_format_price_level(hi)}",
+            "slope": slope,
+        })
+    return segs
+
+
+def _select_price_segment(
+    segs: List[Dict[str, Any]], price_segment: Any
+) -> List[Dict[str, Any]]:
+    """
+    ``price_segment`` 引数に一致する価格区間を1つだけ選んで返す。
+
+    ``price_segment`` はラベル文字列（例：``"6〜8"``）または
+    ``(low, high)`` のタプル／リストで指定する。
+    """
+    for seg in segs:
+        if isinstance(price_segment, (tuple, list)) and len(price_segment) == 2:
+            if (float(seg["low"]) == float(price_segment[0])
+                    and float(seg["high"]) == float(price_segment[1])):
+                return [seg]
+        elif str(price_segment) == seg["label"]:
+            return [seg]
+    labels = [s["label"] for s in segs]
+    raise ValueError(
+        f"指定された価格区間 {price_segment!r} が見つかりません。\n"
+        f"  利用可能な価格区間: {labels}"
+    )
 
 
 # ---------------------------------------------------------------------------

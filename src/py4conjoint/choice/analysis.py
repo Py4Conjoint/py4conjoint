@@ -44,8 +44,12 @@ from ..rating.analysis import (
     SEVERITY_ORDER,
     Diagnostic,
     _display_width,
+    _format_price_level,
     _ljust_display,
+    _price_level_utility_map,
+    _price_segments_from_utilities,
     _rjust_display,
+    _select_price_segment,
     _significance_stars,
 )
 
@@ -348,6 +352,7 @@ def fit(
         se_type=se_type,
         converged=bool(opt.success),
         n_iter=int(opt.nit),
+        vcov=cov,
     )
 
     # 落とし穴チェック用の内部情報（選択された代替案の「セット内位置」の分布）
@@ -434,6 +439,8 @@ class ChoiceConjointResult:
     se_type: str = "nonrobust"
     converged: bool = True
     n_iter: int = 0
+    # 係数の分散共分散行列（多水準価格の同時 Wald 検定で使う）。
+    vcov: Optional[np.ndarray] = None
 
     # 内部用：検出された警告（落とし穴）のリスト
     _diagnostics: List[Diagnostic] = field(default_factory=list)
@@ -758,7 +765,13 @@ class ChoiceConjointResult:
 
     # ---- WTP（限界支払意思額） ----------------------------------------------
 
-    def wtp(self, *, price_col: Optional[str] = None) -> pd.DataFrame:
+    def wtp(
+        self,
+        *,
+        price_col: Optional[str] = None,
+        method: str = "segment",
+        price_segment: Optional[Any] = None,
+    ) -> pd.DataFrame:
         """
         各非価格変数の **WTP（限界支払意思額、Marginal Willingness to Pay）**
         を計算する。
@@ -776,22 +789,53 @@ class ChoiceConjointResult:
         追加で支払ってもよい金額」、数値変数なら「その変数1単位あたりの
         支払意思額」を表す。
 
+        価格列の指定（rating 版と統一）
+        --------------------------------
+        ``price_col`` には **数値（6, 10 など）が入った数値列のラベル**
+        （例：``"price"``）を渡す。価格を ``encode()`` でダミーコーディング
+        した場合（``price_6`` など）も、``price_col`` にはダミー列名ではなく
+        元の数値列名を渡すこと。どの符号化列が価格かは、数値列の水準と
+        ``encode()`` の命名規則から構成的に特定する（``startswith`` による
+        前方一致は使わないため ``price_range_high`` のような別属性の列を
+        誤検出しない）。
+
+        区間別 WTP（method 引数）
+        --------------------------
+        価格をダミーコーディングすると、各価格水準の効用が独立に推定される。
+        これを活かし、価格が3水準以上のときは **隣接する価格水準の区間ごと**
+        に別々の傾き（価格感応度）で WTP を計算する（``method="segment"``、
+        デフォルト）。価格帯によって価格感応度が変わるため、WTP も区間ごとに
+        変わるのが自然である。
+
+        * ``method="segment"``（デフォルト）：区間別。価格が3水準以上のとき、
+          戻り値に ``価格区間`` 列が付き、属性 × 区間の行が出力される。
+        * ``method="linear"``：価格効用が線形だと仮定し、1本の傾きで計算する
+          （従来方式・教材用）。
+        * 価格が数値（線形）変数として説明変数に入っている場合、または価格が
+          2水準のときは、区間が1つだけなので ``method`` によらず単一値を返す。
+
         Parameters
         ----------
         price_col : str, optional
-            価格列名。``fit`` で設定した値を上書きしたい場合に使う。
-            数値（線形）変数として説明変数に含まれている必要がある。
+            価格の数値列名。``fit`` で設定した値を上書きしたい場合に使う。
+        method : {"segment", "linear"}, default "segment"
+            区間別か線形近似か。上記参照。
+        price_segment : str または (low, high), optional
+            特定の価格区間の WTP だけを取り出したいときに指定する。
+            ラベル文字列（例：``"6〜8"``）または ``(6, 8)`` のタプル。
 
         Returns
         -------
         pd.DataFrame
             列：``係数``, ``限界支払意思額``（価格と同じ単位）。
-            インデックスは価格以外の説明変数名。
+            区間別（3水準以上 × ``method="segment"``）のときは先頭に
+            ``価格区間`` 列が付く。インデックスは価格以外の説明変数名。
 
         Raises
         ------
         ValueError
-            価格列が説明変数に含まれていない場合。
+            価格列が指定されていない場合、または価格に対応する説明変数が
+            見つからない場合。``method`` が不正な場合。
 
         Notes
         -----
@@ -803,20 +847,68 @@ class ChoiceConjointResult:
         * 計算は「貨幣の限界効用が一定（価格効用が線形）・所得効果なし」を
           仮定している。
         """
-        price_col = price_col or self.price_col
-        if price_col not in self.encoded_columns:
+        price_col = price_col if price_col is not None else self.price_col
+        if price_col is None:
             raise ValueError(
-                f"価格列 '{price_col}' が説明変数に含まれていません。\n"
-                "  WTP の計算には、価格を数値（線形）の説明変数として\n"
-                "  encoded_columns に含めて fit() してください。\n"
-                "  （価格をダミーコーディングした場合、choice 版の wtp() は\n"
-                "    使えません。価格は数値のまま渡してください。）"
+                "価格列が指定されていません。\n"
+                "  fit() の price_col 引数か、wtp() の price_col 引数で\n"
+                "  価格の数値列名（例: 'price'）を指定してください。"
+            )
+        if method not in ("segment", "linear"):
+            raise ValueError(
+                f"method='{method}' は無効です。\n"
+                "  'segment'（区間別）または 'linear'（線形近似）を指定してください。"
             )
 
-        b_price = float(self.params[price_col])
-        p_price = float(self.pvalues[price_col])
+        # ---- 価格の説明変数を特定する ----
+        # (A) 数値（線形）変数として encoded_columns に入っている場合
+        # (B) ダミーコーディングされ price_col の各水準ダミーが入っている場合
+        numeric_price = (
+            price_col in self.encoded_columns
+            and price_col in self.df.columns
+            and pd.api.types.is_numeric_dtype(self.df[price_col])
+        )
+        price_encoded = (
+            None if numeric_price else self._price_dummy_columns(price_col)
+        )
+        if not numeric_price and not price_encoded:
+            raise ValueError(
+                f"価格列 '{price_col}' に対応する説明変数が見つかりません。\n"
+                "  価格は数値（線形）変数として encoded_columns に含めるか、\n"
+                "  encode() でダミーコーディングして fit() してください。\n"
+                "  （ダミーの場合も price_col には元の数値列名を渡します。）"
+            )
 
-        # ---- 警告：価格係数の有意性（p ≥ 0.10） ----
+        # ---- 価格水準と各水準の効用、価格レンジ、価格区間 ----
+        if numeric_price:
+            price_set = {price_col}
+            b_price = float(self.params[price_col])
+            p_price = float(self.pvalues[price_col])
+            price_vals = self.df[price_col].dropna()
+            levels = sorted(float(x) for x in price_vals.unique())
+            util = {}
+            # 数値線形は区間が1本（傾き = β_price）のみ
+            segs = [{
+                "low": float(price_vals.min()),
+                "high": float(price_vals.max()),
+                "label": (
+                    f"{_format_price_level(price_vals.min())}〜"
+                    f"{_format_price_level(price_vals.max())}"
+                ),
+                "slope": b_price,
+            }]
+        else:
+            price_set = set(price_encoded)
+            p_price = self._price_pvalue(price_encoded)
+            levels, util = _price_level_utility_map(
+                self.df, self.params, price_col, price_encoded, base_zero=True
+            )
+            segs = _price_segments_from_utilities(levels, util)
+
+        low_price, high_price = levels[0], levels[-1]
+        price_range = float(high_price - low_price)
+
+        # ---- 価格係数の有意性の警告（p ≥ 0.10） ----
         already_cats = {d.category for d in self._diagnostics}
         if p_price >= 0.10 and "price_insignificant" not in already_cats:
             self._diagnostics.append(
@@ -835,20 +927,59 @@ class ChoiceConjointResult:
                 )
             )
 
-        price_vals = self.df[price_col].dropna()
-        low_price = float(price_vals.min())
-        high_price = float(price_vals.max())
-        price_range = high_price - low_price
+        # ---- 区間別か単一値かを決める ----
+        multi_segment = (method == "segment") and (len(segs) >= 2)
+        if method == "linear" and len(segs) >= 2:
+            # 線形近似：全水準を1本の傾きにまとめ直す
+            slope_lin = float(np.polyfit(
+                np.array(levels, dtype=float),
+                np.array([util[lv] for lv in levels], dtype=float),
+                1,
+            )[0])
+            segs = [{
+                "low": low_price, "high": high_price,
+                "label": (
+                    f"{_format_price_level(low_price)}〜"
+                    f"{_format_price_level(high_price)}"
+                ),
+                "slope": slope_lin,
+            }]
+            cat_key = "wtp_price_linear_approx"
+            if cat_key not in already_cats:
+                self._diagnostics.append(
+                    Diagnostic(
+                        severity="中",
+                        category="wtp_price_linear_approx",
+                        message=(
+                            f"価格が {len(levels)} 水準ありますが、"
+                            "価格効用が線形であると仮定してWTPを計算しています。"
+                        ),
+                        recommendation=(
+                            "価格効用が等間隔でない場合は近似誤差が生じます。"
+                            "method='segment' なら価格区間ごとの WTP を確認できます。"
+                        ),
+                    )
+                )
+        elif multi_segment and price_segment is not None:
+            segs = _select_price_segment(segs, price_segment)
 
+        # ---- WTP を計算（MWTP = -β_attr / 区間の傾き） ----
         rows = []
-        for col in self.encoded_columns:
-            if col == price_col:
-                continue
-            b = float(self.params[col])
-            wtp_value = -b / b_price
-            rows.append({"variable": col, "係数": b, "限界支払意思額": wtp_value})
+        for seg in segs:
+            money_per_utility = -1.0 / seg["slope"]
+            for col in self.encoded_columns:
+                if col in price_set:
+                    continue
+                b = float(self.params[col])
+                row = {"variable": col, "係数": b,
+                       "限界支払意思額": b * money_per_utility}
+                if multi_segment:
+                    row["価格区間"] = seg["label"]
+                rows.append(row)
         out = pd.DataFrame(rows).set_index("variable")
         out.index.name = "属性（符号化列名）"
+        if multi_segment:
+            out = out[["価格区間", "係数", "限界支払意思額"]]
 
         # ---- 警告：WTP が価格レンジ × 2 を超える（外挿） ----
         if price_range > 0:
@@ -883,7 +1014,56 @@ class ChoiceConjointResult:
         out.attrs["price_low"] = low_price
         out.attrs["price_high"] = high_price
         out.attrs["price_range"] = price_range
+        out.attrs["method"] = method
         return out
+
+    def _price_dummy_columns(self, price_col: str) -> Optional[List[str]]:
+        """
+        価格列に対応する **ダミー符号化列** を構成的に特定する。
+
+        ``encode()`` が ``df.attrs`` に残したメタ情報（属性→符号化列）を
+        優先し、なければ数値水準から ``{price_col}_{水準}`` を構成して
+        ``encoded_columns`` と照合する。``startswith`` の前方一致は使わない
+        ため、``price_range_high`` のような別属性の列を誤検出しない。
+        """
+        meta = (
+            self.df.attrs.get("py4conjoint", {}) if hasattr(self.df, "attrs") else {}
+        )
+        enc_map = meta.get("encoded_columns") or {}
+        mapped = enc_map.get(price_col)
+        if mapped:
+            cols = [c for c in mapped if c in self.encoded_columns]
+            return cols or None
+        if price_col not in self.df.columns:
+            return None
+        levels = list(pd.Series(self.df[price_col].dropna().unique()))
+        names = {f"{price_col}_{lv}" for lv in levels}
+        cols = [c for c in self.encoded_columns if c in names]
+        return cols or None
+
+    def _price_pvalue(self, price_encoded: List[str]) -> float:
+        """
+        価格の有意性の p値を返す。
+
+        ダミー符号化列が1本（2水準）なら係数の z 検定の p値。
+        複数（3水準以上）なら「すべての価格係数 = 0」の同時 Wald 検定
+        （χ² 近似）の p値を返す。先頭列の p値だけでは多水準価格の
+        有意性を正しく判定できないため。
+        """
+        if len(price_encoded) == 1:
+            return float(self.pvalues[price_encoded[0]])
+        idx = [self.encoded_columns.index(c) for c in price_encoded]
+        beta = self.params.to_numpy()[idx]
+        if self.vcov is not None:
+            V = self.vcov[np.ix_(idx, idx)]
+            try:
+                wald = float(beta @ np.linalg.solve(V, beta))
+                return float(stats.chi2.sf(wald, len(idx)))
+            except np.linalg.LinAlgError:
+                pass
+        # フォールバック：最小 p 値の Bonferroni 調整（保守的）
+        ps = [float(self.pvalues[c]) for c in price_encoded]
+        return float(min(1.0, min(ps) * len(ps)))
 
     # ---- 市場シェア予測 ---------------------------------------------------
 
