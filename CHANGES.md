@@ -24,6 +24,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - `cbc_forms_to_data()`：実 Microsoft Forms の回答ファイル（設問列が長文・改行・全角空白・`\xa0` を含み、性別・利用OS などの属性質問が混在する）で、設問列の自動検出が失敗していた問題を修正。実ファイル（3人分の回答）での回帰テスト `tests/test_choice_forms_real.py` を追加。
+- `cbc_forms_to_data(forms="google")`：実 Google Forms の回答 CSV（BOMなしUTF-8、設問列名に `【設問N】` などの識別子接頭辞、属性質問の混在）でも正しく変換できることを確認。読み込みは共通ヘルパー経由で `encoding="utf-8-sig"` を使うため BOMなし・BOM付きの両方に対応する。設問列の検出は回答値ベースのため接頭辞の有無に依存しない（設問の順序は列の出現順に従う）。実 Google ファイル（3人分）での検証テストを `tests/test_choice_forms_real.py` に追加。docstring と `examples/overview_choice.ipynb` に、Google の CSV は BOMなしUTF-8 のため Excel で開くと文字化けするが py4conjoint は正しく読める旨を注記。
 
 ### Removed
 - トップレベルAPI（`pc.fit`・`pc.encode` 等）を廃止。旧API名へアクセスすると日本語の `AttributeError` で `py4conjoint.rating` への移行を案内する（`__version__` などの正当な属性は従来どおり）。

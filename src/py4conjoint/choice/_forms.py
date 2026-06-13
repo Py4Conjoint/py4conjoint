@@ -111,6 +111,15 @@ def cbc_forms_to_data(
         "microsoft" : Microsoft Forms（.xlsx形式）
         "google"    : Google Forms（.csv形式）
 
+        .. note::
+            Google Forms からダウンロードした CSV は **BOMなしUTF-8** のことが
+            多く、Excel でそのまま開くと日本語が文字化けする。しかしファイル
+            自体は正常で、本関数は BOMなし・BOM付きの両方を正しく読み込む
+            （``encoding="utf-8-sig"``）。Excel で中身を確認したい場合は、
+            Google スプレッドシートに取り込んでから ``.xlsx`` で書き出すか、
+            Excel の「データ」→「テキスト/CSVから」で文字コードに UTF-8 を
+            指定してインポートすること。
+
     version : int, default 1
         design のどのバージョンを使うか。
         design を ``n_versions >= 2`` で生成した場合は、バージョンごとに
