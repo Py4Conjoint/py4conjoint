@@ -5,6 +5,9 @@ py4conjoint.rating
 """
 from __future__ import annotations
 
+# バージョン（親パッケージと共通）
+from .. import __version__
+
 # データ作成
 from ._forms import forms_to_conjoint_data
 
