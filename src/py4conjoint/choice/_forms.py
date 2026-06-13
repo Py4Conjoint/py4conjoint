@@ -66,6 +66,27 @@ def cbc_forms_to_data(
       （例：``choice_labels=["A", "B", "C"]`` のとき、回答「製品A」は
       ラベル "A" にマッチ → alt_id 1 が選ばれたと解釈）。
 
+    設問列の検出について
+    --------------------
+    実 Microsoft/Google Forms では、設問の列名が選択肢を含む長文（改行・
+    全角空白・``\\xa0`` を含む）になり、性別・利用OS などの属性質問が
+    同じファイルに混在することがある。本関数は **列名には依存せず、回答値が
+    ``choice_labels`` に一致する列を設問列として検出** するため、列名の表記
+    ゆれで検出が壊れることはない。属性質問の列（回答が「男性」「Apple (iOS)」
+    など ``choice_labels`` に一致しない列）は設問列から自動的に除外される。
+    それらを回答者属性として分析に残したい場合は ``respondent_cols`` で指定する。
+
+    水準表記の不一致について
+    ------------------------
+    設問文・属性質問内の水準表記（例：``"Apple (iOS)"``）と、``design`` の
+    水準表記（例：``"apple"``）は **一致していなくてよい**。回答と代替案の
+    対応は ``choice_labels`` と ``alt_id`` の順序だけで解決され、各代替案の
+    属性・水準は ``design`` 側からそのまま復元されるためである。
+    ただし、属性質問の回答（性別・利用OS など）を ``respondent_cols`` で
+    残して分析に使う場合は、その表記（例：``"Apple (iOS)"`` / ``"Android"``）を
+    利用者側で ``design`` の表記（例：``"apple"`` / ``"android"``）に
+    正規化する必要がある。
+
     Parameters
     ----------
     responses_file : str
@@ -174,24 +195,32 @@ def cbc_forms_to_data(
             f"（design_choice_sets() の出力）。\n"
             f"  受け取った型: {type(design).__name__}"
         )
-    required = ["version", "set_id", "alt_id"]
+    required = ["set_id", "alt_id"]
     missing = [c for c in required if c not in design.columns]
     if missing:
         raise ValueError(
             f"design に必要な列がありません: {missing}\n"
-            "  design_choice_sets() の出力をそのまま渡してください。"
+            "  design_choice_sets() の出力、または set_id・alt_id 列を持つ\n"
+            "  設計表（CSV など）を渡してください。"
         )
 
-    versions = sorted(design["version"].unique())
-    if version not in versions:
-        raise ValueError(
-            f"design にバージョン {version} が存在しません。\n"
-            f"  存在するバージョン: {versions}\n"
-            "  version 引数を確認してください。"
-        )
-    design_v = design[design["version"] == version]
+    # version 列はオプション。design_choice_sets() の出力には付くが、
+    # 手作りの設計CSV（set_id, alt_id, 属性…）には無いことがある。
+    # version 列が無い場合は、設計全体を単一バージョンとして扱う。
+    if "version" in design.columns:
+        versions = sorted(design["version"].unique())
+        if version not in versions:
+            raise ValueError(
+                f"design にバージョン {version} が存在しません。\n"
+                f"  存在するバージョン: {versions}\n"
+                "  version 引数を確認してください。"
+            )
+        design_v = design[design["version"] == version]
+    else:
+        design_v = design
 
-    attr_names = [c for c in design.columns if c not in required]
+    id_cols = ["version", "set_id", "alt_id"]
+    attr_names = [c for c in design.columns if c not in id_cols]
     set_ids = sorted(design_v["set_id"].unique())
     n_sets = len(set_ids)
     n_alts = int(design_v.groupby("set_id")["alt_id"].size().iloc[0])
@@ -248,16 +277,32 @@ def cbc_forms_to_data(
         )
 
     non_question_cols = set(system_cols) | set(respondent_src_cols)
-    question_cols = [c for c in raw.columns if c not in non_question_cols]
+    candidate_cols = [c for c in raw.columns if c not in non_question_cols]
+
+    # 設問列の検出：
+    #   実 Microsoft/Google Forms では、設問の列名が長文（改行・全角空白・
+    #   \xa0 などを含む）になり、性別・利用OS などの属性質問が同じファイルに
+    #   混在することがある。列名に依存せず頑健に検出するため、
+    #   まず管理列・respondent_cols を除いた候補をそのまま設問列とみなし、
+    #   その数が n_sets と一致しない場合は「回答値が choice_labels に一致する
+    #   列だけ」に絞り込む（属性質問の列は回答値が一致しないため除外される）。
+    question_cols = candidate_cols
+    if len(question_cols) != n_sets:
+        question_cols = [
+            c for c in candidate_cols
+            if _is_choice_question_col(raw[c], choice_labels)
+        ]
 
     if len(question_cols) != n_sets:
+        n_excluded = len(candidate_cols) - len(question_cols)
         raise ValueError(
-            f"回答ファイルの設問数 ({len(question_cols)}) が design の"
-            f"設問数 n_sets ({n_sets}) と一致しません。\n"
-            f"  設問列の候補: {question_cols}\n"
-            "  ・設問以外の列（回答者属性など）は respondent_cols で指定して\n"
-            "    除外してください。\n"
-            "  ・design のバージョン（version 引数）が正しいか確認してください。"
+            f"回答ファイルから検出した設問列の数 ({len(question_cols)}) が "
+            f"design の設問数 n_sets ({n_sets}) と一致しません。\n"
+            f"  ・回答値が choice_labels {choice_labels} に一致する列を\n"
+            f"    設問列として検出します（列名の長文・改行・空白には依存しません）。\n"
+            f"  ・設問以外とみなして除外した列: {n_excluded} 列\n"
+            "  ・choice_labels が回答選択肢の文字列と一致しているか、\n"
+            "    design のバージョン（version 引数）が正しいか確認してください。"
         )
 
     # ------------------------------------------------------------------
@@ -348,6 +393,32 @@ def cbc_forms_to_data(
 # ---------------------------------------------------------------------------
 # 内部ヘルパー
 # ---------------------------------------------------------------------------
+
+def _is_choice_question_col(
+    series: pd.Series,
+    choice_labels: List[str],
+) -> bool:
+    """
+    列 ``series`` が「選択設問の回答列」らしいかを、回答値ベースで判定する。
+
+    列名（実 Forms では長文で、改行・全角空白・``\\xa0`` を含みうる）には
+    依存せず、非空の回答値がすべて ``choice_labels`` のいずれかにマッチする
+    場合に ``True`` を返す（マッチ規則は :func:`_match_choice_label` と同じ）。
+
+    性別・利用OS などの属性質問の列は、回答値（例：「男性」「Apple (iOS)」）が
+    ``choice_labels`` に一致しないため ``False`` になり、設問列から除外される。
+    """
+    non_null = [
+        str(v).strip()
+        for v in series
+        if not pd.isna(v) and str(v).strip() != ""
+    ]
+    if not non_null:
+        return False
+    return all(
+        _match_choice_label(v, choice_labels) is not None for v in non_null
+    )
+
 
 def _match_choice_label(
     value: str,
