@@ -14,6 +14,7 @@ All notable changes to this project will be documented in this file.
 - `cbc_forms_to_data()` を追加（`choice/_forms.py`）。Microsoft Forms / Google Forms の回答ファイル（1設問=1選択セット、回答選択肢=代替案）を、`design_choice_sets()` の出力と `choice_labels` によるマッチングで条件付きロジット推定用の long 形式（`obsID`・`respondent_id`・`alt`・`choice` + 属性列）に変換する。設問数の不一致・未マッチ回答値は日本語エラー、未回答は警告のうえ該当選択セットを除外。
 - `examples/overview_choice.ipynb` を追加。choice の全公開APIを網羅する教材ノートブック（設計→診断→必要回答者数→ヨーグルトデータでの推定→解釈→可視化→rating 版との違い）。
 - `rating`・`choice` サブパッケージから `__version__` を参照可能にした（`pcr.__version__` / `pcc.__version__`）。
+- **区間別 WTP** を `rating`・`choice` 双方の `wtp()` に追加。価格を符号化（rating は効果コーディング、choice はダミーコーディング）すると各価格水準の効用が独立に推定されるため、価格が3水準以上のときは **隣接する価格水準の区間ごと** に別々の傾き（価格感応度）で WTP を計算する（`method="segment"`、デフォルト）。戻り値に `価格区間` 列が付き、属性 × 区間の行を返す。`method="linear"` で従来の線形近似1本（単一値）も選べる（教材用）。特定区間だけを取り出す `price_segment` 引数（ラベル文字列または `(low, high)` タプル）も追加。価格2水準のときは区間が1つなので従来どおり単一値を返す。
 - README を更新。rating / choice の2節構成にし、choice のインストール〜クイックスタートを追加。コード例を `import py4conjoint.rating as pcr` 形式に更新。
 
 ### Changed
@@ -21,6 +22,9 @@ All notable changes to this project will be documented in this file.
 - `cbc_forms_to_data()`：実 Microsoft Forms 出力での **設問列の検出を回答値ベースに変更**。設問の列名は依存せず（実ファイルでは列名が選択肢を含む長文になり、改行・全角空白・`\xa0` を含む）、回答値が `choice_labels` に一致する列だけを設問列として検出する。性別・利用OS などの属性質問の列は回答値が一致しないため自動的に除外される（列名ベースの候補数が `n_sets` と一致しない場合に発動。一致する場合は従来どおり）。
 - `cbc_forms_to_data()`：`design` の `version` 列を **オプション扱い**に変更。`version` 列を持たない手作りの設計表（`set_id`・`alt_id` + 属性列のCSVなど）をそのまま渡せるようになった（`version` 列が無い場合は設計全体を単一バージョンとして扱う）。
 - `cbc_forms_to_data()` の docstring に、設問文・属性質問内の水準表記（例：`"Apple (iOS)"`）と `design` の水準表記（例：`"apple"`）は一致していなくてよいこと、ただし属性質問の回答を分析に使う場合は利用者側で正規化が必要なことを明記。
+- **価格列の指定を `rating`・`choice` で統一**。両者とも `price_col` には「数値（6, 10 など）が入った数値列のラベル」（例：`"price"`）を渡す。choice で価格をダミーコーディングした場合（`price_6` など）も `price_col` には元の数値列名を渡せばよくなった（従来は数値線形列のみ対応）。どの符号化列が価格かは、数値列の水準と `encode()` の命名規則から **構成的に特定** する。`startswith` による前方一致を使わないため、`price_range_high` のような接頭辞が紛らわしい別属性の列を誤検出しない。
+- `rating`・`choice` の WTP 計算ロジック・列名（`価格区間`）・警告（`wtp_price_linear_approx` は `method="linear"` のときのみ）を共通化。0.3.0 で追加した価格3水準以上の線形近似は `method="linear"` に整理し、デフォルトは区間別（`method="segment"`）にした。
+- `openpyxl` の下限を `>=3.0` から `>=3.1.5` に引き上げ。古い 3.1.0 系で学生環境のファイル読み込みが不安定になる問題を避けるため。
 
 ### Fixed
 - `cbc_forms_to_data()`：実 Microsoft Forms の回答ファイル（設問列が長文・改行・全角空白・`\xa0` を含み、性別・利用OS などの属性質問が混在する）で、設問列の自動検出が失敗していた問題を修正。実ファイル（3人分の回答）での回帰テスト `tests/test_choice_forms_real.py` を追加。
