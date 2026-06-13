@@ -19,6 +19,7 @@ import py4conjoint.choice as pcc
 
 DATA_DIR = Path(__file__).resolve().parent / "data"
 RESPONSES = DATA_DIR / "forms_cbc_smartphone_real.xlsx"
+GOOGLE_RESPONSES = DATA_DIR / "forms_cbc_smartphone_google.csv"
 DESIGN_CSV = DATA_DIR / "design_smartphone_cbc.csv"
 
 LABELS = ["製品A", "製品B", "製品C"]
@@ -32,6 +33,16 @@ EXPECTED_CHOSEN_ALT = {
     1: 2, 2: 3, 3: 3, 4: 3, 5: 1, 6: 2,        # 回答者1
     7: 1, 8: 3, 9: 3, 10: 3, 11: 2, 12: 2,     # 回答者2
     13: 1, 14: 2, 15: 2, 16: 1, 17: 2, 18: 1,  # 回答者3
+}
+
+# Google Forms 版の正解表（同じ design・choice_labels で照合する）。
+# 回答者1: Q1=A, Q2=B, Q3=B, Q4=C, Q5=B, Q6=A
+# 回答者2: Q1=B, Q2=C, Q3=C, Q4=B, Q5=B, Q6=A
+# 回答者3: Q1=B, Q2=A, Q3=C, Q4=A, Q5=A, Q6=B
+EXPECTED_CHOSEN_ALT_GOOGLE = {
+    1: 1, 2: 2, 3: 2, 4: 3, 5: 2, 6: 1,        # 回答者1
+    7: 2, 8: 3, 9: 3, 10: 2, 11: 2, 12: 1,     # 回答者2
+    13: 2, 14: 1, 15: 3, 16: 1, 17: 1, 18: 2,  # 回答者3
 }
 
 
@@ -119,3 +130,51 @@ def test_real_forms_pipeline_to_encode(design):
     assert "os_apple" in df_coded.columns
     assert "camera_高性能" in df_coded.columns
     assert {"obsID", "choice", "price"}.issubset(df_coded.columns)
+
+
+# ---------------------------------------------------------------------------
+# Google Forms（CSV・BOMなしUTF-8）版
+# ---------------------------------------------------------------------------
+
+def test_google_forms_runs_and_shape(design):
+    """Google Forms の CSV（BOMなしUTF-8）が同じ design・labels で変換できる。"""
+    df = pcc.cbc_forms_to_data(
+        str(GOOGLE_RESPONSES), design, LABELS, forms="google"
+    )
+    # 出力54行（3人 × 6設問 × 3代替案）、列も Microsoft 版と同じ
+    assert len(df) == N_RESP * N_SETS * N_ALTS == 54
+    assert list(df.columns) == [
+        "obsID", "respondent_id", "alt", "choice", "price", "os", "camera"
+    ]
+    # choice 合計 = 18、各 obsID でちょうど1つ choice=1、obsID は 18 通り
+    assert df["choice"].sum() == N_RESP * N_SETS == 18
+    assert (df.groupby("obsID")["choice"].sum() == 1).all()
+    assert sorted(df["obsID"].unique()) == list(range(1, 19))
+
+
+def test_google_forms_choices_match_answer_key(design):
+    """Google 版の選択が正解表と一致する（【設問N】接頭辞の有無に依存しない）。"""
+    df = pcc.cbc_forms_to_data(
+        str(GOOGLE_RESPONSES), design, LABELS, forms="google"
+    )
+    chosen = df[df["choice"] == 1].set_index("obsID")["alt"].to_dict()
+    assert chosen == EXPECTED_CHOSEN_ALT_GOOGLE
+
+
+def test_google_forms_keep_attribute_questions(design):
+    """Google 版でも属性質問（性別・利用OS）を respondent_cols で残せる。"""
+    raw = pd.read_csv(GOOGLE_RESPONSES, encoding="utf-8-sig")
+    gender_col = next(c for c in raw.columns if "性別" in c)
+    os_col = next(c for c in raw.columns if "OS" in c)
+
+    df = pcc.cbc_forms_to_data(
+        str(GOOGLE_RESPONSES),
+        design,
+        LABELS,
+        forms="google",
+        respondent_cols={gender_col: "性別", os_col: "利用OS"},
+    )
+    assert len(df) == 54
+    assert "性別" in df.columns and "利用OS" in df.columns
+    assert set(df.loc[df["respondent_id"] == 1, "性別"]) == {"男性"}
+    assert set(df.loc[df["respondent_id"] == 1, "利用OS"]) == {"Apple (iOS)"}
