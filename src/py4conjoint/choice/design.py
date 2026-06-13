@@ -1,0 +1,627 @@
+"""
+design.py（choice 版）
+======================
+選択型コンジョイント分析（CBC）の **選択セット設計** を担当するモジュール。
+
+* :func:`design_choice_sets` … CBC用の選択セットを生成する
+* :func:`check_design` … 生成した設計の事後診断（バランス・独立性・オーバーラップ）
+* :func:`suggest_n_respondents` … Johnson-Orme の経験則による必要回答者数の目安
+
+rating 版（:mod:`py4conjoint.rating.design`）と対称的なAPIを提供する。
+
+>>> import py4conjoint.choice as pcc
+>>> design = pcc.design_choice_sets(
+...     {"price": [100, 150, 200], "brand": ["A社", "B社", "C社"]},
+...     n_sets=8, n_alts=3, seed=42,
+... )
+>>> pcc.check_design(design)
+>>> pcc.suggest_n_respondents(
+...     {"price": [100, 150, 200], "brand": ["A社", "B社", "C社"]},
+...     n_sets=8, n_alts=3,
+... )
+"""
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass
+from itertools import product as _itertools_product
+from typing import Any, Dict, List, Optional
+
+import numpy as np
+import pandas as pd
+
+# 警告の構造化表現と表示ヘルパーは rating 版と共通のものを使う
+from ..rating.analysis import SEVERITY_ORDER, Diagnostic, _df_to_string_cjk
+
+# ---------------------------------------------------------------------------
+# 公開API: design_choice_sets 関数
+# ---------------------------------------------------------------------------
+
+def design_choice_sets(
+    attributes: Dict[str, List[Any]],
+    n_sets: int,
+    n_alts: int,
+    *,
+    n_versions: int = 1,
+    seed: Optional[int] = None,
+) -> pd.DataFrame:
+    """
+    CBC（選択型コンジョイント分析）用の **選択セット** を生成する。
+
+    全属性水準の完全交差（Full factorial）N 個のプロファイル候補から、
+    各選択セットに ``n_alts`` 個の代替案をランダムに割り当てる。
+    **同一選択セット内に同じプロファイルが重複して入ることはない。**
+
+    Parameters
+    ----------
+    attributes : dict
+        ``{"属性名": [水準1, 水準2, ...]}`` の辞書。
+        辞書のキー順が列の順序になる。
+
+        例::
+
+            {"price": [100, 150, 200], "brand": ["A社", "B社", "C社"]}
+
+    n_sets : int
+        1バージョンあたりの設問数（選択セット数）。
+        回答者は1設問につき1つの代替案を選ぶ。
+
+    n_alts : int
+        1設問（選択セット）あたりの代替案の数。
+        2以上、かつ完全交差の候補数 N 以下である必要がある。
+
+    n_versions : int, default 1
+        アンケートのバージョン数。
+        複数バージョンを作って回答者を分けると、より多くの
+        プロファイル組み合わせをカバーできる（設計の質が上がる）。
+
+    seed : int, optional
+        乱数シード（再現性のため）。
+
+    Returns
+    -------
+    pd.DataFrame
+        long形式のDataFrame。1行 = 1つの選択セット内の1つの代替案。
+
+        列：``version``（バージョン番号 1〜）, ``set_id``（設問番号 1〜）,
+        ``alt_id``（代替案番号 1〜） + 属性列。
+
+        行数 = ``n_versions × n_sets × n_alts``。
+
+        ``df.attrs["n_candidates"]`` — 完全交差の候補数 N。
+
+    Raises
+    ------
+    ValueError
+        ``attributes`` が空または辞書でない場合。
+        いずれかの属性の水準数が 2 未満の場合。
+        ``n_sets`` / ``n_alts`` / ``n_versions`` が範囲外の場合。
+        ``n_alts`` が完全交差の候補数 N を超える場合
+        （セット内の重複を禁止しているため）。
+
+    Notes
+    -----
+    **ランダム設計について**
+
+    本関数は「完全交差からのランダム割り当て（セット内重複なし）」という
+    最も基本的な設計法を使う。設問数 × バージョン数が十分あれば、
+    水準バランス・独立性ともに実用上問題のない設計が得られる。
+    生成後は必ず :func:`check_design` で品質を確認すること。
+
+    Examples
+    --------
+    >>> design = pcc.design_choice_sets(
+    ...     {"price": [100, 150, 200], "brand": ["A社", "B社", "C社"]},
+    ...     n_sets=8, n_alts=3, seed=42,
+    ... )
+    >>> design.head(6)  # 設問1・2の代替案
+    """
+    # ---------- 入力チェック ----------
+    if not isinstance(attributes, dict) or len(attributes) == 0:
+        raise ValueError(
+            "attributes は空でない辞書を指定してください。\n"
+            "  例: {'price': [100, 150, 200], 'brand': ['A社', 'B社']}"
+        )
+    for attr, levels in attributes.items():
+        if len(levels) < 2:
+            raise ValueError(
+                f"属性 '{attr}' の水準数は 2 以上にしてください（現在: {len(levels)}）。"
+            )
+    if n_sets < 1:
+        raise ValueError(
+            f"n_sets は 1 以上の整数を指定してください（指定値: {n_sets}）。"
+        )
+    if n_alts < 2:
+        raise ValueError(
+            f"n_alts は 2 以上の整数を指定してください（指定値: {n_alts}）。\n"
+            "  選択セットには比較対象として最低2つの代替案が必要です。"
+        )
+    if n_versions < 1:
+        raise ValueError(
+            f"n_versions は 1 以上の整数を指定してください（指定値: {n_versions}）。"
+        )
+
+    attrs = list(attributes.keys())
+    levels_list = [list(attributes[a]) for a in attrs]
+
+    # 完全交差の候補プロファイル
+    full = pd.DataFrame(
+        [dict(zip(attrs, combo)) for combo in _itertools_product(*levels_list)]
+    )
+    N = len(full)
+
+    if n_alts > N:
+        raise ValueError(
+            f"n_alts ({n_alts}) が完全交差の候補数 N ({N}) を超えています。\n"
+            "  同一選択セット内のプロファイル重複は禁止しているため、\n"
+            f"  n_alts を {N} 以下にするか、属性・水準を増やしてください。"
+        )
+
+    # ---------- ランダム割り当て（セット内重複なし） ----------
+    rng = np.random.default_rng(seed)
+    frames = []
+    for ver in range(1, n_versions + 1):
+        for s in range(1, n_sets + 1):
+            idx = rng.choice(N, size=n_alts, replace=False)
+            block = full.iloc[idx].copy()
+            block.insert(0, "version", ver)
+            block.insert(1, "set_id", s)
+            block.insert(2, "alt_id", range(1, n_alts + 1))
+            frames.append(block)
+
+    out = pd.concat(frames, ignore_index=True)
+    out.attrs["n_candidates"] = N
+    return out
+
+
+# ---------------------------------------------------------------------------
+# 公開API: check_design 関数
+# ---------------------------------------------------------------------------
+
+@dataclass
+class ChoiceDesignCheckResult:
+    """
+    :func:`check_design` の診断結果を保持するオブジェクト。
+
+    rating 版の :class:`py4conjoint.rating.DesignCheckResult` と
+    同様の使い勝手（``summary()`` / ``warnings()`` / ``print()`` で和文表示）。
+
+    Attributes
+    ----------
+    balance : pd.DataFrame
+        各属性の水準出現頻度と変動係数（CV）。
+        列: 水準数, 最大出現, 最小出現, CV, 評価
+    chi2 : pd.DataFrame
+        属性ペアごとのχ²統計量と自由度（独立性の診断）。
+        列: 属性1, 属性2, χ², 自由度, χ²/自由度, 評価
+    overlap : pd.DataFrame
+        属性ごとのセット内オーバーラップ率
+        （全代替案が同じ水準を持つ設問の割合）。
+        列: オーバーラップ率, 評価
+    diagnostics : List[Diagnostic]
+        検出された問題の一覧。
+    """
+    balance: pd.DataFrame
+    chi2: pd.DataFrame
+    overlap: pd.DataFrame
+    diagnostics: List[Diagnostic]
+
+    def summary(self) -> str:
+        """診断結果を人間が読みやすい形式で返す。"""
+        lines = ["=" * 55, "選択セット設計チェック", "=" * 55]
+
+        lines.append("\n【水準バランス】（CV が小さいほど均等）")
+        lines.append(_df_to_string_cjk(self.balance, index=True))
+
+        lines.append("\n【独立性（χ²統計量）】（自由度に対して小さいほど独立）")
+        lines.append(_df_to_string_cjk(self.chi2, index=False))
+
+        lines.append("\n【セット内オーバーラップ】"
+                     "（全代替案が同じ水準になる設問の割合。小さいほど良い）")
+        lines.append(_df_to_string_cjk(self.overlap, index=True))
+
+        diags = sorted(
+            self.diagnostics,
+            key=lambda d: SEVERITY_ORDER.get(d.severity, 99)
+        )
+        if diags:
+            lines.append("\n【警告】")
+            for d in diags:
+                lines.append(f"  [{d.severity}] {d.message}")
+                lines.append(f"      → {d.recommendation}")
+        else:
+            lines.append("\n警告はありません。")
+
+        lines.append("=" * 55)
+        return "\n".join(lines)
+
+    def warnings(self) -> pd.DataFrame:
+        """警告一覧を DataFrame で返す。"""
+        if not self.diagnostics:
+            return pd.DataFrame(
+                columns=["severity", "category", "message", "recommendation"]
+            )
+        return pd.DataFrame(
+            [
+                {
+                    "severity": d.severity,
+                    "category": d.category,
+                    "message": d.message,
+                    "recommendation": d.recommendation,
+                }
+                for d in sorted(
+                    self.diagnostics,
+                    key=lambda d: SEVERITY_ORDER.get(d.severity, 99)
+                )
+            ]
+        )
+
+    def __repr__(self) -> str:
+        return self.summary()
+
+
+def check_design(
+    design: pd.DataFrame,
+    *,
+    attributes: Optional[List[str]] = None,
+) -> ChoiceDesignCheckResult:
+    """
+    選択セット設計の品質をアンケート実施前に診断する。
+
+    :func:`design_choice_sets` の出力（long形式）を渡すことを想定。
+    以下の3点を診断する：
+
+    1. **水準バランス** … 各属性の各水準が均等に出現しているか（CV）。
+    2. **属性間の独立性** … 2属性の水準組み合わせが偏っていないか（χ²）。
+    3. **セット内オーバーラップ** … 同一設問内の全代替案が同じ水準を
+       持ってしまう設問の割合。オーバーラップが多い属性は、その設問では
+       比較情報を生まない（どれを選んでも同じ水準なので）。
+
+    Parameters
+    ----------
+    design : pd.DataFrame
+        :func:`design_choice_sets` の出力形式のDataFrame
+        （``version``, ``set_id``, ``alt_id`` + 属性列）。
+
+    attributes : list of str, optional
+        チェック対象の属性名のリスト。
+        省略時は ``version`` / ``set_id`` / ``alt_id`` を除く全列を対象とする。
+
+    Returns
+    -------
+    ChoiceDesignCheckResult
+
+    Notes
+    -----
+    χ² 統計量の p 値は計算しない（rating 版の ``check_design`` と同じ方針）。
+    「χ²/自由度」の比率と定性的な評価記号（◎○△）で判断する。
+    """
+    if not isinstance(design, pd.DataFrame):
+        raise TypeError(
+            f"design は pandas.DataFrame を指定してください。\n"
+            f"  受け取った型: {type(design).__name__}"
+        )
+    id_cols = ["version", "set_id", "alt_id"]
+    attrs = attributes or [c for c in design.columns if c not in id_cols]
+    missing = [a for a in attrs if a not in design.columns]
+    if missing:
+        raise ValueError(
+            f"以下の属性が design に存在しません: {missing}\n"
+            f"  存在する列: {list(design.columns)}"
+        )
+    if not attrs:
+        raise ValueError(
+            "チェック対象の属性列が見つかりません。\n"
+            "  design_choice_sets() の出力をそのまま渡すか、\n"
+            "  attributes 引数で属性列を指定してください。"
+        )
+
+    balance_df = _check_balance(design, attrs)
+    chi2_df = _check_chi2(design, attrs)
+    overlap_df = _check_overlap(design, attrs)
+    diags = _design_diagnostics(design, attrs, balance_df, chi2_df, overlap_df)
+
+    return ChoiceDesignCheckResult(
+        balance=balance_df,
+        chi2=chi2_df,
+        overlap=overlap_df,
+        diagnostics=diags,
+    )
+
+
+# ---------------------------------------------------------------------------
+# 公開API: suggest_n_respondents 関数
+# ---------------------------------------------------------------------------
+
+def suggest_n_respondents(
+    attributes: Dict[str, List[Any]],
+    *,
+    n_sets: int,
+    n_alts: int,
+) -> pd.DataFrame:
+    """
+    CBC調査に必要な **回答者数の目安** を Johnson-Orme の経験則で計算する。
+
+    経験則（Johnson & Orme）::
+
+        n ≥ 500 × c / (t × a)
+
+    * ``n`` … 回答者数
+    * ``c`` … 最大水準数（全属性のうち最も水準数が多い属性の水準数）
+    * ``t`` … 設問数（1人の回答者が答える選択セット数）
+    * ``a`` … 1設問あたりの代替案数
+
+    「各水準が（選ばれる機会として）少なくとも500回提示される」ことを
+    目安とするルール。主効果のみのモデルを前提とする。
+
+    Parameters
+    ----------
+    attributes : dict
+        ``design_choice_sets()`` と同じ形式の辞書。
+
+    n_sets : int
+        1人の回答者が答える設問数（選択セット数）t。
+
+    n_alts : int
+        1設問あたりの代替案数 a。
+
+    Returns
+    -------
+    pd.DataFrame
+        属性ごとの必要回答者数の内訳。
+        列：``"水準数"``, ``"必要回答者数（目安）"``。
+        インデックスは属性名。
+
+        ``df.attrs["n_required"]``  — 全体で必要な回答者数
+        （= 最大水準数 c に基づく値。これを満たせば全属性で条件を満たす）
+
+        ``df.attrs["c_max"]``       — 最大水準数 c
+
+        ``df.attrs["n_sets"]``      — 設問数 t
+
+        ``df.attrs["n_alts"]``      — 代替案数 a
+
+    Raises
+    ------
+    ValueError
+        ``attributes`` が空または辞書でない場合。
+        いずれかの属性の水準数が 2 未満の場合。
+        ``n_sets`` または ``n_alts`` が範囲外の場合。
+
+    Notes
+    -----
+    **Johnson-Orme の経験則について**
+
+    Sawtooth Software の創設者 Rich Johnson と Bryan Orme が提案した
+    実務上の経験則で、CBC のサンプルサイズ設計で広く使われる。
+    「最低限」の目安であり、サブグループ別の分析（男女別など）を
+    行う場合はグループごとにこの人数が必要になる。
+
+    Examples
+    --------
+    >>> pcc.suggest_n_respondents(
+    ...     {"price": [100, 150, 200], "brand": ["A社", "B社", "C社"]},
+    ...     n_sets=8, n_alts=3,
+    ... )
+    """
+    # ---------- 入力バリデーション ----------
+    if not isinstance(attributes, dict) or len(attributes) == 0:
+        raise ValueError(
+            "attributes は空でない辞書を指定してください。\n"
+            "  例: {'price': [100, 150, 200], 'brand': ['A社', 'B社']}"
+        )
+    for attr, lvs in attributes.items():
+        if len(lvs) < 2:
+            raise ValueError(
+                f"属性 '{attr}' の水準数は 2 以上にしてください（現在: {len(lvs)}）。"
+            )
+    if n_sets < 1:
+        raise ValueError(
+            f"n_sets は 1 以上の整数を指定してください（指定値: {n_sets}）。"
+        )
+    if n_alts < 2:
+        raise ValueError(
+            f"n_alts は 2 以上の整数を指定してください（指定値: {n_alts}）。"
+        )
+
+    rows = []
+    for attr, lvs in attributes.items():
+        c = len(lvs)
+        n_req = math.ceil(500 * c / (n_sets * n_alts))
+        rows.append({
+            "属性": attr,
+            "水準数": c,
+            "必要回答者数（目安）": n_req,
+        })
+    result = pd.DataFrame(rows).set_index("属性")
+
+    c_max = int(result["水準数"].max())
+    n_required = int(result["必要回答者数（目安）"].max())
+    result.attrs.update({
+        "n_required": n_required,
+        "c_max": c_max,
+        "n_sets": n_sets,
+        "n_alts": n_alts,
+    })
+
+    print(
+        f"Johnson-Orme の経験則: n ≥ 500 × c / (t × a)\n"
+        f"  最大水準数 c = {c_max}, 設問数 t = {n_sets}, 代替案数 a = {n_alts}\n"
+        f"  → 必要回答者数の目安: {n_required} 人以上\n"
+        "  （サブグループ別に分析する場合はグループごとにこの人数が必要です）"
+    )
+    return result
+
+
+# ---------------------------------------------------------------------------
+# 内部ヘルパー（rating/design.py・rating/analysis.py から流用）
+# ---------------------------------------------------------------------------
+
+def _check_balance(design: pd.DataFrame, attrs: List[str]) -> pd.DataFrame:
+    """各属性の水準出現頻度と変動係数（CV）を計算する。"""
+    rows = []
+    for attr in attrs:
+        counts = design[attr].value_counts()
+        mean = counts.mean()
+        cv = float(counts.std() / mean) if mean > 0 else float("inf")
+        if cv < 0.05:
+            label = "◎"
+        elif cv < 0.15:
+            label = "○"
+        else:
+            label = "△"
+        rows.append({
+            "属性": attr,
+            "水準数": len(counts),
+            "最大出現": int(counts.max()),
+            "最小出現": int(counts.min()),
+            "CV": round(cv, 4),
+            "評価": label,
+        })
+    return pd.DataFrame(rows).set_index("属性")
+
+
+def _check_chi2(design: pd.DataFrame, attrs: List[str]) -> pd.DataFrame:
+    """
+    属性ペアのχ²統計量と自由度を計算する（scipy不要）。
+    p値の代わりに χ²/自由度 の比率と定性的評価を返す。
+    """
+    rows = []
+    for i, a1 in enumerate(attrs):
+        for a2 in attrs[i + 1:]:
+            ct = pd.crosstab(design[a1], design[a2]).values.astype(float)
+            row_sum = ct.sum(axis=1, keepdims=True)
+            col_sum = ct.sum(axis=0, keepdims=True)
+            n = ct.sum()
+            if n == 0:
+                continue
+            expected = row_sum @ col_sum / n
+            with np.errstate(divide="ignore", invalid="ignore"):
+                chi2_val = float(
+                    np.where(expected > 0, (ct - expected) ** 2 / expected, 0).sum()
+                )
+            dof = (ct.shape[0] - 1) * (ct.shape[1] - 1)
+            ratio = chi2_val / dof if dof > 0 else float("inf")
+            if ratio < 0.1:
+                label = "◎"
+            elif ratio < 1.0:
+                label = "○"
+            else:
+                label = "△"
+            rows.append({
+                "属性1": a1,
+                "属性2": a2,
+                "χ²": round(chi2_val, 4),
+                "自由度": dof,
+                "χ²/自由度": round(ratio, 4),
+                "評価": label,
+            })
+    return pd.DataFrame(rows)
+
+
+def _check_overlap(design: pd.DataFrame, attrs: List[str]) -> pd.DataFrame:
+    """
+    属性ごとのセット内オーバーラップ率を計算する。
+
+    オーバーラップ率 = 「同一選択セット内の全代替案が同じ水準を持つ設問」の割合。
+    その設問では当該属性が選択の判断材料にならない（情報を生まない）ため、
+    小さいほど良い。
+    """
+    group_keys = [c for c in ("version", "set_id") if c in design.columns]
+    if not group_keys:
+        # set_id 等がない場合は全体を1セットとみなす（実用上は起こらない想定）
+        group_keys = [design.index]
+
+    nunique = design.groupby(group_keys, sort=False)[attrs].nunique()
+    rows = []
+    for attr in attrs:
+        rate = float((nunique[attr] == 1).mean())
+        if rate < 0.1:
+            label = "◎"
+        elif rate < 0.3:
+            label = "○"
+        else:
+            label = "△"
+        rows.append({
+            "属性": attr,
+            "オーバーラップ率": round(rate, 4),
+            "評価": label,
+        })
+    return pd.DataFrame(rows).set_index("属性")
+
+
+def _design_diagnostics(
+    design: pd.DataFrame,
+    attrs: List[str],
+    balance_df: pd.DataFrame,
+    chi2_df: pd.DataFrame,
+    overlap_df: pd.DataFrame,
+) -> List[Diagnostic]:
+    """設計チェックの結果から Diagnostic のリストを生成する。"""
+    diags: List[Diagnostic] = []
+
+    # バランスチェック（rating 版と同じ閾値）
+    for attr, row in balance_df.iterrows():
+        cv = row["CV"]
+        if cv > 0.3:
+            diags.append(Diagnostic(
+                severity="大",
+                category=f"balance_{attr}",
+                message=f"属性 '{attr}' の水準出現頻度が偏っています（CV={cv:.3f}）。",
+                recommendation=(
+                    "設問数（n_sets）またはバージョン数（n_versions）を増やすか、"
+                    "seed を変えて再生成してください。"
+                ),
+            ))
+        elif cv > 0.15:
+            diags.append(Diagnostic(
+                severity="中",
+                category=f"balance_{attr}",
+                message=f"属性 '{attr}' の水準出現頻度にやや偏りがあります（CV={cv:.3f}）。",
+                recommendation="可能であれば設問数・バージョン数を増やしてください。",
+            ))
+
+    # χ²チェック（rating 版と同じ閾値）
+    for _, row in chi2_df.iterrows():
+        ratio = row["χ²/自由度"]
+        a1, a2 = row["属性1"], row["属性2"]
+        if ratio > 1.0:
+            diags.append(Diagnostic(
+                severity="中",
+                category=f"chi2_{a1}_{a2}",
+                message=(
+                    f"'{a1}' と '{a2}' のχ²/自由度={ratio:.3f} > 1.0 で、"
+                    "独立性が低い可能性があります。"
+                ),
+                recommendation="2属性の水準組み合わせが偏っていないか確認してください。",
+            ))
+
+    # オーバーラップチェック
+    for attr, row in overlap_df.iterrows():
+        rate = row["オーバーラップ率"]
+        if rate > 0.5:
+            diags.append(Diagnostic(
+                severity="大",
+                category=f"overlap_{attr}",
+                message=(
+                    f"属性 '{attr}' は設問の {rate:.0%} で全代替案が同じ水準に"
+                    "なっています。これらの設問では当該属性が選択の判断材料に"
+                    "ならず、推定精度が大きく下がります。"
+                ),
+                recommendation=(
+                    "n_alts を減らす、水準数を増やす、または seed を変えて"
+                    "再生成し、オーバーラップ率を下げてください。"
+                ),
+            ))
+        elif rate > 0.3:
+            diags.append(Diagnostic(
+                severity="中",
+                category=f"overlap_{attr}",
+                message=(
+                    f"属性 '{attr}' のセット内オーバーラップ率がやや高いです"
+                    f"（{rate:.0%}）。"
+                ),
+                recommendation="設問数を増やすか seed を変えて再生成を検討してください。",
+            ))
+
+    return diags
