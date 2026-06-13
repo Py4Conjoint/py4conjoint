@@ -759,13 +759,16 @@ def test_wtp_three_level_price_no_extra_columns():
         suffix_map={"price": ["low", "mid"]},
     )
     result = pc.fit(df_coded, price_col="price")
-    wtp = result.wtp()
+    wtp = result.wtp()  # 区間別（デフォルト）
     # 価格列（price_low, price_mid）が WTP 出力に含まれないこと
     assert "price_low" not in wtp.index, "price_low が WTP 出力に混入している"
     assert "price_mid" not in wtp.index, "price_mid が WTP 出力に混入している"
-    # os_0 のみが含まれること
-    assert "os_0" in wtp.index, "os_0 が WTP 出力にない"
-    assert len(wtp) == 1, f"WTP 出力の行数が1以外: {len(wtp)}"
+    # 非価格属性は os_0 のみ（区間ごとに1行ずつ出力される）
+    assert set(wtp.index) == {"os_0"}, f"os_0 以外が混入: {set(wtp.index)}"
+    # 区間別なので 価格区間 列が付き、2区間（6〜8, 8〜10）になる
+    assert "価格区間" in wtp.columns
+    assert len(wtp) == 2, f"WTP 出力の行数が2以外: {len(wtp)}"
+    assert set(wtp["価格区間"]) == {"6〜8", "8〜10"}
     print("OK test_wtp_three_level_price_no_extra_columns")
 
 
@@ -791,20 +794,27 @@ def test_wtp_three_level_price():
     )
     result = pc.fit(df_coded, price_col="price")
 
-    # NotImplementedError が出ないこと
+    # エラーを出さず、区間別の DataFrame を返すこと
     wtp = result.wtp()
     assert isinstance(wtp, pd.DataFrame), "wtp() が DataFrame を返さない"
+    assert "価格区間" in wtp.columns, "区間別 WTP に 価格区間 列がない"
+    # apple の WTP は各区間で正のはず
+    assert (wtp["限界支払意思額"] > 0).all(), \
+        f"apple の区間別 WTP に負の値: {wtp['限界支払意思額'].tolist()}"
 
-    # appleのWTPは正のはず
-    assert wtp.loc["os_0", "限界支払意思額"] > 0, \
-        f"apple の WTP が負: {wtp.loc['os_0', '限界支払意思額']}"
-
-    # 線形近似警告が出るはず
+    # デフォルト（method='segment'）では線形近似警告は出ない
     cats = [d.category for d in result._diagnostics]
-    assert "wtp_price_linear_approx" in cats, \
-        f"wtp_price_linear_approx 警告が出ていない。警告: {cats}"
+    assert "wtp_price_linear_approx" not in cats, \
+        f"segment なのに線形近似警告が出ている: {cats}"
 
-    print(f"  3水準価格 WTP_os = {wtp.loc['os_0', '限界支払意思額']:.4f}")
+    # method='linear' のときだけ線形近似1本の単一値＋警告になる
+    wtp_lin = result.wtp(method="linear")
+    assert "価格区間" not in wtp_lin.columns
+    assert wtp_lin.loc["os_0", "限界支払意思額"] > 0
+    cats2 = [d.category for d in result._diagnostics]
+    assert "wtp_price_linear_approx" in cats2, \
+        f"method='linear' で線形近似警告が出ていない: {cats2}"
+
     print("OK test_wtp_three_level_price")
 
 
@@ -1300,7 +1310,7 @@ def test_unit_rating_money_three_level_price():
 
 
 def test_wtp_three_level_price_warnings_not_duplicated():
-    """3水準価格で wtp() を複数回呼んでも wtp_price_linear_approx 警告が重複しない"""
+    """3水準価格で wtp(method='linear') を複数回呼んでも警告が重複しない"""
     rng = np.random.default_rng(42)
     n_resp = 25
     rows = []
@@ -1320,9 +1330,9 @@ def test_wtp_three_level_price_warnings_not_duplicated():
     )
     result = pc.fit(df_coded, price_col="price")
 
-    _ = result.wtp()
-    _ = result.wtp()
-    _ = result.wtp()
+    _ = result.wtp(method="linear")
+    _ = result.wtp(method="linear")
+    _ = result.wtp(method="linear")
 
     from collections import Counter
     all_cats = [d.category for d in result._diagnostics]
