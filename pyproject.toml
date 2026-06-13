@@ -16,7 +16,7 @@ dependencies = [
     "scipy>=1.8",
     "statsmodels>=0.13",
     "matplotlib>=3.4",
-    "openpyxl>=3.0",
+    "openpyxl>=3.1.5",
 ]
 keywords = ["conjoint", "survey", "marketing", "pandas", "japanese", "education"]
 classifiers = [

@@ -1492,7 +1492,7 @@ test = [
 requires-dist = [
     { name = "matplotlib", specifier = ">=3.4" },
     { name = "numpy", specifier = ">=1.21" },
-    { name = "openpyxl", specifier = ">=3.0" },
+    { name = "openpyxl", specifier = ">=3.1.5" },
     { name = "pandas", specifier = ">=1.5" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=7.0" },
     { name = "scipy", specifier = ">=1.8" },
