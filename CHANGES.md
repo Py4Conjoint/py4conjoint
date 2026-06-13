@@ -18,6 +18,12 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - 既存モジュール（`_forms.py`・`design.py`・`encoding.py`・`analysis.py`・`plot.py`）を `rating/` サブパッケージへ移動。評点型コンジョイント分析は `import py4conjoint.rating as pcr` で利用する。
+- `cbc_forms_to_data()`：実 Microsoft Forms 出力での **設問列の検出を回答値ベースに変更**。設問の列名は依存せず（実ファイルでは列名が選択肢を含む長文になり、改行・全角空白・`\xa0` を含む）、回答値が `choice_labels` に一致する列だけを設問列として検出する。性別・利用OS などの属性質問の列は回答値が一致しないため自動的に除外される（列名ベースの候補数が `n_sets` と一致しない場合に発動。一致する場合は従来どおり）。
+- `cbc_forms_to_data()`：`design` の `version` 列を **オプション扱い**に変更。`version` 列を持たない手作りの設計表（`set_id`・`alt_id` + 属性列のCSVなど）をそのまま渡せるようになった（`version` 列が無い場合は設計全体を単一バージョンとして扱う）。
+- `cbc_forms_to_data()` の docstring に、設問文・属性質問内の水準表記（例：`"Apple (iOS)"`）と `design` の水準表記（例：`"apple"`）は一致していなくてよいこと、ただし属性質問の回答を分析に使う場合は利用者側で正規化が必要なことを明記。
+
+### Fixed
+- `cbc_forms_to_data()`：実 Microsoft Forms の回答ファイル（設問列が長文・改行・全角空白・`\xa0` を含み、性別・利用OS などの属性質問が混在する）で、設問列の自動検出が失敗していた問題を修正。実ファイル（3人分の回答）での回帰テスト `tests/test_choice_forms_real.py` を追加。
 
 ### Removed
 - トップレベルAPI（`pc.fit`・`pc.encode` 等）を廃止。旧API名へアクセスすると日本語の `AttributeError` で `py4conjoint.rating` への移行を案内する（`__version__` などの正当な属性は従来どおり）。
