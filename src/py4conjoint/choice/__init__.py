@@ -37,16 +37,44 @@ rating（評点型）と対称的なAPIを提供する。
 """
 from __future__ import annotations
 
+# バージョン（親パッケージと共通）
+from .. import __version__
+
+# Forms 回答ファイルの読み込み
+from ._forms import cbc_forms_to_data
+
 # 条件付きロジットの推定
 from .analysis import ChoiceConjointResult, fit
+
+# 選択セット設計
+from .design import (
+    ChoiceDesignCheckResult,
+    check_design,
+    design_choice_sets,
+    suggest_n_respondents,
+)
 
 # ダミーコーディング（0/1）
 from .encoding import encode
 
+# 可視化
+from .plot import plot_importance, plot_partworth, plot_wtp
+
 __all__ = [
+    # Forms 読み込み
+    "cbc_forms_to_data",
+    # 設計
+    "design_choice_sets",
+    "check_design",
+    "ChoiceDesignCheckResult",
+    "suggest_n_respondents",
     # 符号化
     "encode",
     # 分析
     "fit",
     "ChoiceConjointResult",
+    # 可視化
+    "plot_importance",
+    "plot_partworth",
+    "plot_wtp",
 ]

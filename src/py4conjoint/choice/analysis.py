@@ -31,7 +31,7 @@ analysis.py（choice 版）
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import numpy as np
 import pandas as pd
@@ -954,6 +954,36 @@ class ChoiceConjointResult:
             )
 
         return pd.Series(share, index=products.index, name="market_share")
+
+    # ---- 可視化 -----------------------------------------------------------
+
+    def plot_importance(self, **kwargs: Any) -> Any:
+        """
+        重要度の棒グラフを描画する。
+        :func:`py4conjoint.choice.plot.plot_importance` へのショートカット。
+
+        Returns
+        -------
+        matplotlib.axes.Axes
+        """
+        from .plot import plot_importance
+        return plot_importance(self, **kwargs)
+
+    def plot_partworth(self, **kwargs: Any) -> Any:
+        """
+        部分効用（パートワース）の棒グラフを描画する。
+        :func:`py4conjoint.choice.plot.plot_partworth` へのショートカット。
+        """
+        from .plot import plot_partworth
+        return plot_partworth(self, **kwargs)
+
+    def plot_wtp(self, **kwargs: Any) -> Any:
+        """
+        WTPの棒グラフを描画する。
+        :func:`py4conjoint.choice.plot.plot_wtp` へのショートカット。
+        """
+        from .plot import plot_wtp
+        return plot_wtp(self, **kwargs)
 
     # ---- 内部処理 ---------------------------------------------------------
 
