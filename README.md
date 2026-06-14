@@ -242,7 +242,7 @@ df_coded = pcc.encode(df, reference_levels={"brand": "A社"})
 ```python
 result = pcc.fit(
     df_coded,
-    choice_set_col    = "obsID",          # 選択セットID（回答者×設問）
+    choice_set_id_col = "choice_set_id",  # 選択セットID（回答者×設問）
     respondent_id_col = "respondent_id",  # クラスタロバスト標準誤差に使用
 )
 print(result)

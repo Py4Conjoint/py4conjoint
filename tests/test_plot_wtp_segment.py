@@ -48,7 +48,7 @@ def _simulate_cbc(price_util, brand_util, *, n_sets=30_000, n_alts=3, seed=0):
         p /= p.sum()
         ch = (rng.random() < p.cumsum()).argmax()
         for j in range(n_alts):
-            rows.append({"obsID": t, "choice": int(j == ch),
+            rows.append({"choice_set_id": t, "choice": int(j == ch),
                          "price": int(pr[j]), "brand": br[j]})
     return pd.DataFrame(rows)
 
@@ -72,7 +72,7 @@ def choice_3level():
     df = _simulate_cbc({6: 0.0, 8: -0.3, 10: -1.6}, {"A": 0.0, "B": 0.6},
                        n_sets=40_000, seed=5)
     dc = pcc.encode(df, reference_levels={"price": 6, "brand": "A"})
-    return pcc.fit(dc, choice="choice", choice_set_col="obsID",
+    return pcc.fit(dc, choice="choice", choice_set_id_col="choice_set_id",
                    encoded_columns=["price_8", "price_10", "brand_B"],
                    price_col="price")
 
@@ -82,7 +82,7 @@ def choice_2level():
     df = _simulate_cbc({6: 0.0, 10: -1.2}, {"A": 0.0, "B": 0.5},
                        n_sets=30_000, seed=3)
     dc = pcc.encode(df, reference_levels={"price": 10, "brand": "A"})
-    return pcc.fit(dc, choice="choice", choice_set_col="obsID",
+    return pcc.fit(dc, choice="choice", choice_set_id_col="choice_set_id",
                    encoded_columns=["price_6", "brand_B"], price_col="price")
 
 

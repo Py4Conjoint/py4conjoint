@@ -83,7 +83,7 @@ def design_choice_sets(
     pd.DataFrame
         long形式のDataFrame。1行 = 1つの選択セット内の1つの代替案。
 
-        列：``version``（バージョン番号 1〜）, ``set_id``（設問番号 1〜）,
+        列：``version``（バージョン番号 1〜）, ``choice_set_id``（設問番号 1〜）,
         ``alt_id``（代替案番号 1〜） + 属性列。
 
         行数 = ``n_versions × n_sets × n_alts``。
@@ -165,7 +165,7 @@ def design_choice_sets(
             idx = rng.choice(N, size=n_alts, replace=False)
             block = full.iloc[idx].copy()
             block.insert(0, "version", ver)
-            block.insert(1, "set_id", s)
+            block.insert(1, "choice_set_id", s)
             block.insert(2, "alt_id", range(1, n_alts + 1))
             frames.append(block)
 
@@ -281,11 +281,11 @@ def check_design(
     ----------
     design : pd.DataFrame
         :func:`design_choice_sets` の出力形式のDataFrame
-        （``version``, ``set_id``, ``alt_id`` + 属性列）。
+        （``version``, ``choice_set_id``, ``alt_id`` + 属性列）。
 
     attributes : list of str, optional
         チェック対象の属性名のリスト。
-        省略時は ``version`` / ``set_id`` / ``alt_id`` を除く全列を対象とする。
+        省略時は ``version`` / ``choice_set_id`` / ``alt_id`` を除く全列を対象とする。
 
     Returns
     -------
@@ -301,7 +301,7 @@ def check_design(
             f"design は pandas.DataFrame を指定してください。\n"
             f"  受け取った型: {type(design).__name__}"
         )
-    id_cols = ["version", "set_id", "alt_id"]
+    id_cols = ["version", "choice_set_id", "alt_id"]
     attrs = attributes or [c for c in design.columns if c not in id_cols]
     missing = [a for a in attrs if a not in design.columns]
     if missing:
@@ -527,9 +527,9 @@ def _check_overlap(design: pd.DataFrame, attrs: List[str]) -> pd.DataFrame:
     その設問では当該属性が選択の判断材料にならない（情報を生まない）ため、
     小さいほど良い。
     """
-    group_keys = [c for c in ("version", "set_id") if c in design.columns]
+    group_keys = [c for c in ("version", "choice_set_id") if c in design.columns]
     if not group_keys:
-        # set_id 等がない場合は全体を1セットとみなす（実用上は起こらない想定）
+        # choice_set_id 等がない場合は全体を1セットとみなす（実用上は起こらない想定）
         group_keys = [design.index]
 
     nunique = design.groupby(group_keys, sort=False)[attrs].nunique()

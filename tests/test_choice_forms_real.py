@@ -28,7 +28,7 @@ N_SETS = 6
 N_ALTS = 3
 
 # 実回答から手作業で確認した正解（alt_id: 製品A=1, 製品B=2, 製品C=3）。
-# obsID は回答者1の設問1〜6 → 1〜6、回答者2 → 7〜12、回答者3 → 13〜18。
+# choice_set_id は回答者1の設問1〜6 → 1〜6、回答者2 → 7〜12、回答者3 → 13〜18。
 EXPECTED_CHOSEN_ALT = {
     1: 2, 2: 3, 3: 3, 4: 3, 5: 1, 6: 2,        # 回答者1
     7: 1, 8: 3, 9: 3, 10: 3, 11: 2, 12: 2,     # 回答者2
@@ -54,7 +54,7 @@ def design():
 def test_design_csv_has_no_version_column(design):
     """設計CSVは version 列を持たない（手作り設計の想定）。"""
     assert "version" not in design.columns
-    assert list(design.columns) == ["set_id", "alt_id", "price", "os", "camera"]
+    assert list(design.columns) == ["choice_set_id", "alt_id", "price", "os", "camera"]
 
 
 def test_real_forms_runs_and_shape(design):
@@ -63,16 +63,16 @@ def test_real_forms_runs_and_shape(design):
 
     # (a) 行数 = 3人 × 6設問 × 3代替案 = 54
     assert len(df) == N_RESP * N_SETS * N_ALTS == 54
-    # 出力列：obsID, respondent_id, alt, choice + 属性列
+    # 出力列：choice_set_id, respondent_id, alt, choice + 属性列
     assert list(df.columns) == [
-        "obsID", "respondent_id", "alt", "choice", "price", "os", "camera"
+        "choice_set_id", "respondent_id", "alt", "choice", "price", "os", "camera"
     ]
     # (b) choice の合計 = 3 × 6 = 18（各回答者×設問でちょうど1つ choice=1）
     assert df["choice"].sum() == N_RESP * N_SETS == 18
-    assert (df.groupby("obsID")["choice"].sum() == 1).all()
-    # (c) obsID は 18 通り（3人 × 6設問）
-    assert sorted(df["obsID"].unique()) == list(range(1, 19))
-    assert (df.groupby("obsID").size() == N_ALTS).all()
+    assert (df.groupby("choice_set_id")["choice"].sum() == 1).all()
+    # (c) choice_set_id は 18 通り（3人 × 6設問）
+    assert sorted(df["choice_set_id"].unique()) == list(range(1, 19))
+    assert (df.groupby("choice_set_id").size() == N_ALTS).all()
 
 
 def test_real_forms_choices_match_answer_key(design):
@@ -81,7 +81,7 @@ def test_real_forms_choices_match_answer_key(design):
 
     chosen = (
         df[df["choice"] == 1]
-        .set_index("obsID")["alt"]
+        .set_index("choice_set_id")["alt"]
         .to_dict()
     )
     assert chosen == EXPECTED_CHOSEN_ALT
@@ -90,10 +90,10 @@ def test_real_forms_choices_match_answer_key(design):
 def test_real_forms_attributes_match_design(design):
     """選ばれた代替案の属性が設計CSVの水準と一致する。"""
     df = pcc.cbc_forms_to_data(str(RESPONSES), design, LABELS, forms="microsoft")
-    design_indexed = design.set_index(["set_id", "alt_id"])
+    design_indexed = design.set_index(["choice_set_id", "alt_id"])
 
-    # obsID 1 = 回答者1の設問1。製品B(alt2)が選ばれている。
-    row = df[(df["obsID"] == 1) & (df["alt"] == 2)].iloc[0]
+    # choice_set_id 1 = 回答者1の設問1。製品B(alt2)が選ばれている。
+    row = df[(df["choice_set_id"] == 1) & (df["alt"] == 2)].iloc[0]
     assert row["choice"] == 1
     expected = design_indexed.loc[(1, 2)]
     assert row["price"] == expected["price"]
@@ -126,10 +126,10 @@ def test_real_forms_pipeline_to_encode(design):
     """実データが encode までそのまま流れる（fit に渡せる形になる）。"""
     df = pcc.cbc_forms_to_data(str(RESPONSES), design, LABELS, forms="microsoft")
     df_coded = pcc.encode(df, reference_levels={"os": "android", "camera": "標準"})
-    # ダミー列が追加され、obsID/choice はそのまま残る
+    # ダミー列が追加され、choice_set_id/choice はそのまま残る
     assert "os_apple" in df_coded.columns
     assert "camera_高性能" in df_coded.columns
-    assert {"obsID", "choice", "price"}.issubset(df_coded.columns)
+    assert {"choice_set_id", "choice", "price"}.issubset(df_coded.columns)
 
 
 # ---------------------------------------------------------------------------
@@ -144,12 +144,12 @@ def test_google_forms_runs_and_shape(design):
     # 出力54行（3人 × 6設問 × 3代替案）、列も Microsoft 版と同じ
     assert len(df) == N_RESP * N_SETS * N_ALTS == 54
     assert list(df.columns) == [
-        "obsID", "respondent_id", "alt", "choice", "price", "os", "camera"
+        "choice_set_id", "respondent_id", "alt", "choice", "price", "os", "camera"
     ]
-    # choice 合計 = 18、各 obsID でちょうど1つ choice=1、obsID は 18 通り
+    # choice 合計 = 18、各 choice_set_id でちょうど1つ choice=1、choice_set_id は 18 通り
     assert df["choice"].sum() == N_RESP * N_SETS == 18
-    assert (df.groupby("obsID")["choice"].sum() == 1).all()
-    assert sorted(df["obsID"].unique()) == list(range(1, 19))
+    assert (df.groupby("choice_set_id")["choice"].sum() == 1).all()
+    assert sorted(df["choice_set_id"].unique()) == list(range(1, 19))
 
 
 def test_google_forms_choices_match_answer_key(design):
@@ -157,7 +157,7 @@ def test_google_forms_choices_match_answer_key(design):
     df = pcc.cbc_forms_to_data(
         str(GOOGLE_RESPONSES), design, LABELS, forms="google"
     )
-    chosen = df[df["choice"] == 1].set_index("obsID")["alt"].to_dict()
+    chosen = df[df["choice"] == 1].set_index("choice_set_id")["alt"].to_dict()
     assert chosen == EXPECTED_CHOSEN_ALT_GOOGLE
 
 

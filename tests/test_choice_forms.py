@@ -69,18 +69,18 @@ def test_microsoft_happy_path(tmp_path, design):
 
     # 形状：2回答者 × 4設問 × 3代替案
     assert len(df) == 2 * N_SETS * N_ALTS
-    assert list(df.columns) == ["obsID", "respondent_id", "alt", "choice",
+    assert list(df.columns) == ["choice_set_id", "respondent_id", "alt", "choice",
                                 "price", "brand"]
-    # obsID は回答者×設問の通し番号（1〜8）、各 obsID に3行
-    assert sorted(df["obsID"].unique()) == list(range(1, 9))
-    assert (df.groupby("obsID").size() == N_ALTS).all()
+    # choice_set_id は回答者×設問の通し番号（1〜8）、各 choice_set_id に3行
+    assert sorted(df["choice_set_id"].unique()) == list(range(1, 9))
+    assert (df.groupby("choice_set_id").size() == N_ALTS).all()
     # 各選択セットでちょうど1つ選ばれている
-    assert (df.groupby("obsID")["choice"].sum() == 1).all()
+    assert (df.groupby("choice_set_id")["choice"].sum() == 1).all()
     # 回答者1の設問1は「製品A」→ alt 1 が choice=1
-    first = df[(df["respondent_id"] == 1) & (df["obsID"] == 1)]
+    first = df[(df["respondent_id"] == 1) & (df["choice_set_id"] == 1)]
     assert first.loc[first["alt"] == 1, "choice"].iloc[0] == 1
     # 属性は design と一致する（設問1・alt1 の水準）
-    d11 = design[(design["set_id"] == 1) & (design["alt_id"] == 1)].iloc[0]
+    d11 = design[(design["choice_set_id"] == 1) & (design["alt_id"] == 1)].iloc[0]
     assert first.loc[first["alt"] == 1, "price"].iloc[0] == d11["price"]
     assert first.loc[first["alt"] == 1, "brand"].iloc[0] == d11["brand"]
 
@@ -91,7 +91,7 @@ def test_google_happy_path(tmp_path, design):
     _make_google_csv(f, answers)
     df = pcc.cbc_forms_to_data(str(f), design, LABELS, forms="google")
     assert len(df) == 1 * N_SETS * N_ALTS
-    assert (df.groupby("obsID")["choice"].sum() == 1).all()
+    assert (df.groupby("choice_set_id")["choice"].sum() == 1).all()
 
 
 def test_respondent_cols(tmp_path, design):
@@ -122,7 +122,7 @@ def test_end_to_end_encode_fit(tmp_path, design):
     df_coded = pcc.encode(df, reference_levels={"brand": "A社"})
     result = pcc.fit(
         df_coded,
-        choice_set_col="obsID",
+        choice_set_id_col="choice_set_id",
         respondent_id_col="respondent_id",
     )
     assert result.n_sets == 30 * N_SETS
@@ -162,8 +162,8 @@ def test_unanswered_warning_and_drop(tmp_path, design):
         df = pcc.cbc_forms_to_data(str(f), design, LABELS)
     # 未回答の選択セットは除外される：(2人×4設問 − 1) × 3代替案
     assert len(df) == (2 * N_SETS - 1) * N_ALTS
-    # obsID は欠番なく連番
-    assert sorted(df["obsID"].unique()) == list(range(1, 2 * N_SETS))
+    # choice_set_id は欠番なく連番
+    assert sorted(df["choice_set_id"].unique()) == list(range(1, 2 * N_SETS))
 
 
 def test_choice_labels_length_error(tmp_path, design):

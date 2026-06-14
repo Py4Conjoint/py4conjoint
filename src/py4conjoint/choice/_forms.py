@@ -46,7 +46,7 @@ def cbc_forms_to_data(
     forms: Literal["microsoft", "google"] = "microsoft",
     version: int = 1,
     respondent_cols: Optional[Dict[str, str]] = None,
-    obs_id_colname: str = "obsID",
+    choice_set_id_colname: str = "choice_set_id",
     respondent_id_colname: str = "respondent_id",
     alt_colname: str = "alt",
     choice_colname: str = "choice",
@@ -95,7 +95,7 @@ def cbc_forms_to_data(
 
     design : pd.DataFrame
         :func:`design_choice_sets` の出力DataFrame
-        （``version``, ``set_id``, ``alt_id`` + 属性列）。
+        （``version``, ``choice_set_id``, ``alt_id`` + 属性列）。
         アンケートの各設問に提示した代替案の属性・水準が、
         この設計から復元される。
 
@@ -132,9 +132,9 @@ def cbc_forms_to_data(
         例：``{"性別": "gender", "学年": "year"}``
         省略した場合は回答者属性を付与しない。
 
-    obs_id_colname : str, default "obsID"
+    choice_set_id_colname : str, default "choice_set_id"
         出力DataFrameの「回答者×設問」通し番号列の名前。
-        :func:`py4conjoint.choice.fit` の ``choice_set_col`` に渡す。
+        :func:`py4conjoint.choice.fit` の ``choice_set_id_col`` に渡す。
 
     respondent_id_colname : str, default "respondent_id"
         出力DataFrameの回答者ID列の名前。
@@ -155,7 +155,7 @@ def cbc_forms_to_data(
     pd.DataFrame
         long形式のDataFrame。1行 = 1回答者の1設問の1代替案。
 
-        列：``obsID``（回答者×設問の通し番号）, ``respondent_id``,
+        列：``choice_set_id``（回答者×設問の通し番号）, ``respondent_id``,
         ``alt``（代替案番号）, ``choice``（選ばれたら1、それ以外0）,
         [回答者属性], + 属性列。
 
@@ -166,7 +166,7 @@ def cbc_forms_to_data(
             df_coded = pcc.encode(df, reference_levels={"brand": "A社"})
             result = pcc.fit(
                 df_coded,
-                choice_set_col="obsID",
+                choice_set_id_col="choice_set_id",
                 respondent_id_col="respondent_id",
             )
 
@@ -176,7 +176,7 @@ def cbc_forms_to_data(
         responses_file が存在しない場合。
     ValueError
         forms が "microsoft" または "google" 以外の場合。
-        design に必要な列（version, set_id, alt_id）がない場合。
+        design に必要な列（version, choice_set_id, alt_id）がない場合。
         指定した version が design に存在しない場合。
         choice_labels の長さが design の代替案数と一致しない場合。
         回答ファイルの設問数が design の設問数（n_sets）と一致しない場合。
@@ -204,17 +204,17 @@ def cbc_forms_to_data(
             f"（design_choice_sets() の出力）。\n"
             f"  受け取った型: {type(design).__name__}"
         )
-    required = ["set_id", "alt_id"]
+    required = ["choice_set_id", "alt_id"]
     missing = [c for c in required if c not in design.columns]
     if missing:
         raise ValueError(
             f"design に必要な列がありません: {missing}\n"
-            "  design_choice_sets() の出力、または set_id・alt_id 列を持つ\n"
+            "  design_choice_sets() の出力、または choice_set_id・alt_id 列を持つ\n"
             "  設計表（CSV など）を渡してください。"
         )
 
     # version 列はオプション。design_choice_sets() の出力には付くが、
-    # 手作りの設計CSV（set_id, alt_id, 属性…）には無いことがある。
+    # 手作りの設計CSV（choice_set_id, alt_id, 属性…）には無いことがある。
     # version 列が無い場合は、設計全体を単一バージョンとして扱う。
     if "version" in design.columns:
         versions = sorted(design["version"].unique())
@@ -228,11 +228,11 @@ def cbc_forms_to_data(
     else:
         design_v = design
 
-    id_cols = ["version", "set_id", "alt_id"]
+    id_cols = ["version", "choice_set_id", "alt_id"]
     attr_names = [c for c in design.columns if c not in id_cols]
-    set_ids = sorted(design_v["set_id"].unique())
-    n_sets = len(set_ids)
-    n_alts = int(design_v.groupby("set_id")["alt_id"].size().iloc[0])
+    choice_set_ids = sorted(design_v["choice_set_id"].unique())
+    n_sets = len(choice_set_ids)
+    n_alts = int(design_v.groupby("choice_set_id")["alt_id"].size().iloc[0])
 
     choice_labels = [str(lb) for lb in choice_labels]
     if len(choice_labels) != n_alts:
@@ -317,18 +317,18 @@ def cbc_forms_to_data(
     # ------------------------------------------------------------------
     # 3. 回答値 → 代替案番号（alt_id）のマッチング
     # ------------------------------------------------------------------
-    # 設問列の並び順 = design の set_id の昇順、と対応づける
-    question_map = dict(zip(question_cols, set_ids))
+    # 設問列の並び順 = design の choice_set_id の昇順、と対応づける
+    question_map = dict(zip(question_cols, choice_set_ids))
 
     n_respondents = len(raw)
     respondent_ids = range(1, n_respondents + 1)
 
-    chosen: Dict[tuple, int] = {}   # (respondent_id, set_id) → alt_id
+    chosen: Dict[tuple, int] = {}   # (respondent_id, choice_set_id) → alt_id
     n_unanswered = 0
     unmatched: List[str] = []
 
     for r_idx, resp_id in enumerate(respondent_ids):
-        for q_col, set_id in question_map.items():
+        for q_col, choice_set_id in question_map.items():
             value = raw.iloc[r_idx][q_col]
             if pd.isna(value) or str(value).strip() == "":
                 n_unanswered += 1
@@ -337,7 +337,7 @@ def cbc_forms_to_data(
             if alt_id is None:
                 unmatched.append(str(value))
                 continue
-            chosen[(resp_id, set_id)] = alt_id
+            chosen[(resp_id, choice_set_id)] = alt_id
 
     if unmatched:
         uniq = sorted(set(unmatched))
@@ -359,19 +359,19 @@ def cbc_forms_to_data(
     # ------------------------------------------------------------------
     # 4. long形式の組み立て（1行 = 1回答者 × 1設問 × 1代替案）
     # ------------------------------------------------------------------
-    design_indexed = design_v.set_index(["set_id", "alt_id"])
+    design_indexed = design_v.set_index(["choice_set_id", "alt_id"])
 
     rows = []
     obs_counter = 0
     for r_idx, resp_id in enumerate(respondent_ids):
-        for set_id in set_ids:
-            key = (resp_id, set_id)
+        for choice_set_id in choice_set_ids:
+            key = (resp_id, choice_set_id)
             if key not in chosen:  # 未回答セットは除外
                 continue
             obs_counter += 1
             for alt_id in range(1, n_alts + 1):
                 row = {
-                    obs_id_colname: obs_counter,
+                    choice_set_id_colname: obs_counter,
                     respondent_id_colname: resp_id,
                     alt_colname: alt_id,
                     choice_colname: int(chosen[key] == alt_id),
@@ -379,11 +379,11 @@ def cbc_forms_to_data(
                 for src, dst in respondent_rename.items():
                     row[dst] = raw.iloc[r_idx][src]
                 for attr in attr_names:
-                    row[attr] = design_indexed.loc[(set_id, alt_id), attr]
+                    row[attr] = design_indexed.loc[(choice_set_id, alt_id), attr]
                 rows.append(row)
 
     col_order = (
-        [obs_id_colname, respondent_id_colname, alt_colname, choice_colname]
+        [choice_set_id_colname, respondent_id_colname, alt_colname, choice_colname]
         + list(respondent_rename.values())
         + attr_names
     )

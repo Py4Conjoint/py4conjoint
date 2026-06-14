@@ -11,7 +11,7 @@ analysis.py（choice 版）
 >>> result = pcc.fit(
 ...     df_coded,
 ...     choice="choice",
-...     choice_set_col="選択セットID",
+...     choice_set_id_col="選択セットID",
 ...     encoded_columns=["price", "brand_hiland", "brand_yoplait"],
 ... )
 >>> print(result.summary())     # 和文サマリー
@@ -61,7 +61,7 @@ def fit(
     df: pd.DataFrame,
     *,
     choice: str = "choice",
-    choice_set_col: str = "選択セットID",
+    choice_set_id_col: str = "選択セットID",
     encoded_columns: Optional[List[str]] = None,
     reference_levels: Optional[Dict[str, object]] = None,
     price_col: str = "price",
@@ -94,7 +94,7 @@ def fit(
         被説明変数の列名。選ばれた代替案が ``1``、それ以外が ``0``。
         各選択セットにはちょうど1つの ``1`` が必要。
 
-    choice_set_col : str, default "選択セットID"
+    choice_set_id_col : str, default "選択セットID"
         選択セット（質問）を識別する列名。
         同じIDを持つ行が「同時に提示された代替案の組」を表す。
         選択セットごとの代替案数は揃っていなくてもよい。
@@ -157,12 +157,12 @@ def fit(
             f"  受け取った型: {type(df).__name__}"
         )
     for col, label in [(choice, "choice（選択結果）"),
-                       (choice_set_col, "選択セットID")]:
+                       (choice_set_id_col, "選択セットID")]:
         if col not in df.columns:
             raise ValueError(
                 f"{label} の列 '{col}' が DataFrame にありません。\n"
                 f"  存在する列: {list(df.columns)}\n"
-                "  choice / choice_set_col 引数で正しい列名を指定してください。"
+                "  choice / choice_set_id_col 引数で正しい列名を指定してください。"
             )
 
     # ---------- encode() からのメタ情報を取得 ----------
@@ -206,8 +206,8 @@ def fit(
     use_cols = [choice] + list(encoded_columns)
     has_na = df[use_cols].isna().any(axis=1)
     if has_na.any():
-        bad_sets = df.loc[has_na, choice_set_col].unique()
-        df = df[~df[choice_set_col].isin(bad_sets)]
+        bad_sets = df.loc[has_na, choice_set_id_col].unique()
+        df = df[~df[choice_set_id_col].isin(bad_sets)]
     n_dropped = n_before - len(df)
     if len(df) == 0:
         raise ValueError(
@@ -225,18 +225,18 @@ def fit(
         )
 
     # ---------- 選択セットごとに並べ替えて配列化 ----------
-    df_sorted = df.sort_values(choice_set_col, kind="mergesort").reset_index(drop=True)
+    df_sorted = df.sort_values(choice_set_id_col, kind="mergesort").reset_index(drop=True)
     X = df_sorted[encoded_columns].to_numpy(dtype=float)
     y = df_sorted[choice].to_numpy(dtype=float)
-    codes = pd.factorize(df_sorted[choice_set_col])[0]
+    codes = pd.factorize(df_sorted[choice_set_id_col])[0]
     starts = np.flatnonzero(np.r_[True, codes[1:] != codes[:-1]])
     counts = np.diff(np.r_[starts, len(codes)])
     n_sets = len(starts)
-    set_ids = df_sorted[choice_set_col].to_numpy()[starts]
+    choice_set_ids = df_sorted[choice_set_id_col].to_numpy()[starts]
 
     # 各選択セットの検証：代替案2つ以上、選択はちょうど1つ
     n_chosen = np.add.reduceat(y, starts)
-    too_few = set_ids[counts < 2]
+    too_few = choice_set_ids[counts < 2]
     if len(too_few) > 0:
         raise ValueError(
             f"代替案が1つしかない選択セットがあります: {too_few[:5].tolist()}"
@@ -244,7 +244,7 @@ def fit(
             "  条件付きロジットには各選択セットに2つ以上の代替案が必要です。\n"
             "  （「選ばない」を許す場合は「購入しない」という代替案を行として追加します）"
         )
-    bad_choice = set_ids[n_chosen != 1]
+    bad_choice = choice_set_ids[n_chosen != 1]
     if len(bad_choice) > 0:
         raise ValueError(
             f"選ばれた代替案がちょうど1つでない選択セットがあります: "
@@ -311,7 +311,7 @@ def fit(
         if (n_resp_per_set > 1).any():
             raise ValueError(
                 "同じ選択セットに複数の回答者IDが含まれています。\n"
-                f"  選択セットID列 '{choice_set_col}' は回答者×質問ごとに\n"
+                f"  選択セットID列 '{choice_set_id_col}' は回答者×質問ごとに\n"
                 "  一意になるようにしてください。"
             )
         # 選択セットごとのスコア（対数尤度の勾配への寄与）
@@ -339,7 +339,7 @@ def fit(
         pvalues=pd.Series(pvals, index=encoded_columns, name="p値"),
         df=df_sorted,
         choice=choice,
-        choice_set_col=choice_set_col,
+        choice_set_id_col=choice_set_id_col,
         encoded_columns=list(encoded_columns),
         reference_levels=reference_levels or {},
         price_col=price_col,
@@ -393,7 +393,7 @@ class ChoiceConjointResult:
         分析に使ったデータ（選択セットIDで並べ替え済み）。
     choice : str
         選択結果（0/1）の列名。
-    choice_set_col : str
+    choice_set_id_col : str
         選択セットIDの列名。
     encoded_columns : list of str
         説明変数のリスト。
@@ -426,7 +426,7 @@ class ChoiceConjointResult:
     pvalues: pd.Series
     df: pd.DataFrame
     choice: str
-    choice_set_col: str
+    choice_set_id_col: str
     encoded_columns: List[str]
     reference_levels: Dict[str, object]
     price_col: str

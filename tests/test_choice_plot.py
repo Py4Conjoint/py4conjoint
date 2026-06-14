@@ -41,7 +41,7 @@ def result():
         "brand": brand.ravel(),
     })
     df_coded = pcc.encode(df, reference_levels={"brand": "A"})
-    return pcc.fit(df_coded, choice="choice", choice_set_col="選択セットID")
+    return pcc.fit(df_coded, choice="choice", choice_set_id_col="選択セットID")
 
 
 @pytest.fixture(autouse=True)

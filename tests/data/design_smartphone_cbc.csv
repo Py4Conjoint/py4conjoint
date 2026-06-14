@@ -1,4 +1,4 @@
-set_id,alt_id,price,os,camera
+choice_set_id,alt_id,price,os,camera
 1,1,6,apple,高性能
 1,2,10,apple,標準
 1,3,10,android,標準

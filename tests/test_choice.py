@@ -104,7 +104,7 @@ def test_synthetic_recovery():
     """人工データから真の係数を許容誤差 1e-2 程度で回復できる"""
     df = _simulate_choice_data(n_sets=100_000, seed=42)
     df_coded = pcc.encode(df, reference_levels={"brand": "A"})
-    result = pcc.fit(df_coded, choice="choice", choice_set_col="選択セットID")
+    result = pcc.fit(df_coded, choice="choice", choice_set_id_col="選択セットID")
 
     assert result.converged
     # encoded_columns は encode() のメタ情報 + price から自動検出される
@@ -119,7 +119,7 @@ def test_synthetic_api_consistency():
     """summary/importance/wtp/market_share が rating 版と同じ形式で動く"""
     df = _simulate_choice_data(n_sets=5_000, seed=7)
     df_coded = pcc.encode(df, reference_levels={"brand": "A"})
-    result = pcc.fit(df_coded, choice="choice", choice_set_col="選択セットID")
+    result = pcc.fit(df_coded, choice="choice", choice_set_id_col="選択セットID")
 
     # summary は和文の文字列
     s = result.summary()
@@ -180,7 +180,7 @@ def test_separation_warning():
         "x": np.tile([1.0, 0.0], n_sets),
     })
     result = pcc.fit(
-        df, choice="choice", choice_set_col="選択セットID",
+        df, choice="choice", choice_set_id_col="選択セットID",
         encoded_columns=["x"],
     )
     sep = result.warnings(category="separation")
@@ -200,11 +200,15 @@ def test_separation_warning():
 def yogurt_result():
     df = pd.read_csv(DATA_DIR / "yogurt.csv")
     assert len(df) == ref.N_OBS * ref.N_ALTS  # 2412 × 4 = 9648 行
+    # yogurt.csv の選択セット列名は logitr 由来の慣習名 "obsID"。
+    # 公開 API の列名（choice_set_id）にリネームしてから fit に渡す
+    # （外部データの CSV 自体は obsID のまま）。
+    df = df.rename(columns={"obsID": "choice_set_id"})
     df_coded = pcc.encode(df, reference_levels={"brand": ref.REFERENCE_LEVEL})
     return pcc.fit(
         df_coded,
         choice="choice",
-        choice_set_col="obsID",
+        choice_set_id_col="choice_set_id",
         encoded_columns=["price", "feat", "brand_hiland", "brand_weight",
                          "brand_yoplait"],
     )
@@ -255,16 +259,18 @@ def test_yogurt_loglik_match_logitr(yogurt_result):
 def test_yogurt_cluster_se():
     """回答者ID列を指定するとクラスタロバスト標準誤差になる"""
     df = pd.read_csv(DATA_DIR / "yogurt.csv")
+    # CSV の慣習列名 obsID を公開 API の choice_set_id にリネーム
+    df = df.rename(columns={"obsID": "choice_set_id"})
     df_coded = pcc.encode(df, reference_levels={"brand": ref.REFERENCE_LEVEL})
     cols = ["price", "feat", "brand_hiland", "brand_weight", "brand_yoplait"]
     result = pcc.fit(
-        df_coded, choice="choice", choice_set_col="obsID",
+        df_coded, choice="choice", choice_set_id_col="choice_set_id",
         encoded_columns=cols, respondent_id_col="id",
     )
     assert result.se_type == "cluster"
     # 係数はクラスタリングの有無で変わらない
     nonrobust = pcc.fit(
-        df_coded, choice="choice", choice_set_col="obsID",
+        df_coded, choice="choice", choice_set_id_col="choice_set_id",
         encoded_columns=cols, cluster_se=False, respondent_id_col="id",
     )
     assert np.allclose(result.params.to_numpy(), nonrobust.params.to_numpy())
@@ -282,7 +288,7 @@ def test_few_choice_sets_warning():
     """選択セット数が説明変数数の5倍未満なら few_choice_sets（大）が出る"""
     df = _simulate_choice_data(n_sets=8, seed=0)
     df_coded = pcc.encode(df, reference_levels={"brand": "A"})
-    result = pcc.fit(df_coded, choice="choice", choice_set_col="選択セットID")
+    result = pcc.fit(df_coded, choice="choice", choice_set_id_col="選択セットID")
     # 8 セット / 3 変数 = 2.7 倍 < 5
     w = result.warnings(category="few_choice_sets")
     assert len(w) == 1
@@ -306,7 +312,7 @@ def test_unbalanced_choices_warning():
                 "x": float(rng.random()),
             })
     df = pd.DataFrame(rows)
-    result = pcc.fit(df, choice="choice", choice_set_col="選択セットID",
+    result = pcc.fit(df, choice="choice", choice_set_id_col="選択セットID",
                      encoded_columns=["x"])
     w = result.warnings(category="unbalanced_choices")
     assert len(w) == 1
@@ -329,20 +335,20 @@ def test_fit_validation_errors():
     # choice 列がない
     with pytest.raises(ValueError, match="choice"):
         pcc.fit(base.drop(columns=["choice"]), choice="choice",
-                choice_set_col="選択セットID", encoded_columns=["x"])
+                choice_set_id_col="選択セットID", encoded_columns=["x"])
 
     # choice 列が 0/1 でない
     bad = base.copy()
     bad["choice"] = [1, 2, 0, 1]
     with pytest.raises(ValueError, match="0/1"):
-        pcc.fit(bad, choice="choice", choice_set_col="選択セットID",
+        pcc.fit(bad, choice="choice", choice_set_id_col="選択セットID",
                 encoded_columns=["x"])
 
     # 選択がちょうど1つでない選択セット
     bad2 = base.copy()
     bad2["choice"] = [1, 1, 0, 1]
     with pytest.raises(ValueError, match="ちょうど1つ"):
-        pcc.fit(bad2, choice="choice", choice_set_col="選択セットID",
+        pcc.fit(bad2, choice="choice", choice_set_id_col="選択セットID",
                 encoded_columns=["x"])
 
     # 代替案が1つしかない選択セット
@@ -352,13 +358,13 @@ def test_fit_validation_errors():
         "x": [1.0, 0.0, 0.5],
     })
     with pytest.raises(ValueError, match="代替案が1つ"):
-        pcc.fit(bad3, choice="choice", choice_set_col="選択セットID",
+        pcc.fit(bad3, choice="choice", choice_set_id_col="選択セットID",
                 encoded_columns=["x"])
 
     # 説明変数が見つからない（encode() 未実施・encoded_columns 未指定）
     with pytest.raises(ValueError, match="説明変数が見つかりません"):
         pcc.fit(base[["選択セットID", "choice"]], choice="choice",
-                choice_set_col="選択セットID")
+                choice_set_id_col="選択セットID")
 
     print("OK test_fit_validation_errors")
 
@@ -367,7 +373,7 @@ def test_wtp_requires_linear_price():
     """価格が説明変数に含まれない場合、wtp() は日本語エラーを出す"""
     df = _simulate_choice_data(n_sets=200, seed=5)
     df_coded = pcc.encode(df, reference_levels={"brand": "A"})
-    result = pcc.fit(df_coded, choice="choice", choice_set_col="選択セットID",
+    result = pcc.fit(df_coded, choice="choice", choice_set_id_col="選択セットID",
                      encoded_columns=["brand_B", "brand_C"])
     with pytest.raises(ValueError, match="価格列"):
         result.wtp()

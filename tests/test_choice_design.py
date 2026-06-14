@@ -23,10 +23,10 @@ ATTRS = {"price": [100, 150, 200], "brand": ["A社", "B社", "C社"]}
 
 def test_design_shape_and_columns():
     design = pcc.design_choice_sets(ATTRS, n_sets=8, n_alts=3, seed=42)
-    assert list(design.columns) == ["version", "set_id", "alt_id", "price", "brand"]
+    assert list(design.columns) == ["version", "choice_set_id", "alt_id", "price", "brand"]
     assert len(design) == 1 * 8 * 3
     assert design["version"].unique().tolist() == [1]
-    assert sorted(design["set_id"].unique()) == list(range(1, 9))
+    assert sorted(design["choice_set_id"].unique()) == list(range(1, 9))
     assert sorted(design["alt_id"].unique()) == [1, 2, 3]
     assert design.attrs["n_candidates"] == 9  # 3水準 × 3水準
 
@@ -40,7 +40,7 @@ def test_design_versions():
 
 def test_design_no_duplicate_profiles_within_set():
     design = pcc.design_choice_sets(ATTRS, n_sets=50, n_alts=3, seed=1)
-    for _, block in design.groupby(["version", "set_id"]):
+    for _, block in design.groupby(["version", "choice_set_id"]):
         profiles = block[["price", "brand"]].apply(tuple, axis=1)
         assert profiles.nunique() == len(block), \
             "同一選択セット内にプロファイルの重複があります"
@@ -105,7 +105,7 @@ def test_check_design_detects_overlap():
     # brand が全セットで同一水準になるよう手作りする
     design = pd.DataFrame({
         "version": [1] * 8,
-        "set_id":  [1, 1, 2, 2, 3, 3, 4, 4],
+        "choice_set_id":  [1, 1, 2, 2, 3, 3, 4, 4],
         "alt_id":  [1, 2] * 4,
         "price":   [100, 150, 150, 200, 100, 200, 150, 100],
         "brand":   ["A社", "A社", "B社", "B社", "A社", "A社", "B社", "B社"],

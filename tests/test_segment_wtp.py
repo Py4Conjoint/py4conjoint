@@ -38,7 +38,7 @@ def _simulate_cbc(price_util, brand_util, *, n_sets=40_000, n_alts=3, seed=0):
         p /= p.sum()
         ch = (rng.random() < p.cumsum()).argmax()
         for j in range(n_alts):
-            rows.append({"obsID": t, "choice": int(j == ch),
+            rows.append({"choice_set_id": t, "choice": int(j == ch),
                          "price": int(pr[j]), "brand": br[j]})
     return pd.DataFrame(rows)
 
@@ -78,7 +78,7 @@ def test_choice_target_code_runs():
         p /= p.sum()
         ch = (rng.random() < p.cumsum()).argmax()
         for j in range(2):
-            rows.append({"obsID": t, "respondent_id": t % 30,
+            rows.append({"choice_set_id": t, "respondent_id": t % 30,
                          "choice": int(j == ch), "price": int(pr[j]),
                          "os": osv[j], "camera": cam[j]})
     df = pd.DataFrame(rows)
@@ -88,7 +88,7 @@ def test_choice_target_code_runs():
     result = pcc.fit(
         df_coded,
         choice="choice",
-        choice_set_col="obsID",
+        choice_set_id_col="choice_set_id",
         encoded_columns=["price_6", "os_apple", "camera_high"],
         respondent_id_col="respondent_id",
         price_col="price",
@@ -110,12 +110,12 @@ def test_choice_2level_dummy_matches_numeric():
                        n_sets=40_000, seed=3)
     # (A) ダミー価格
     dc = pcc.encode(df, reference_levels={"price": 10, "brand": "A"})
-    r_dummy = pcc.fit(dc, choice="choice", choice_set_col="obsID",
+    r_dummy = pcc.fit(dc, choice="choice", choice_set_id_col="choice_set_id",
                       encoded_columns=["price_6", "brand_B"], price_col="price")
     w_dummy = float(r_dummy.wtp().loc["brand_B", "限界支払意思額"])
     # (B) 数値価格
     dc2 = pcc.encode(df, reference_levels={"brand": "A"})
-    r_num = pcc.fit(dc2, choice="choice", choice_set_col="obsID",
+    r_num = pcc.fit(dc2, choice="choice", choice_set_id_col="choice_set_id",
                     encoded_columns=["price", "brand_B"], price_col="price")
     w_num = float(r_num.wtp().loc["brand_B", "限界支払意思額"])
     assert np.isclose(w_dummy, w_num, rtol=1e-4), \
@@ -132,7 +132,7 @@ def test_choice_3level_segment_slopes():
     df = _simulate_cbc({6: 0.0, 8: -0.3, 10: -1.6}, {"A": 0.0, "B": 0.6},
                        n_sets=60_000, seed=5)
     dc = pcc.encode(df, reference_levels={"price": 6, "brand": "A"})
-    result = pcc.fit(dc, choice="choice", choice_set_col="obsID",
+    result = pcc.fit(dc, choice="choice", choice_set_id_col="choice_set_id",
                      encoded_columns=["price_8", "price_10", "brand_B"],
                      price_col="price")
     w = result.wtp()  # 区間別（デフォルト）
@@ -159,7 +159,7 @@ def test_choice_price_segment_filter():
     df = _simulate_cbc({6: 0.0, 8: -0.3, 10: -1.6}, {"A": 0.0, "B": 0.6},
                        n_sets=20_000, seed=6)
     dc = pcc.encode(df, reference_levels={"price": 6, "brand": "A"})
-    result = pcc.fit(dc, choice="choice", choice_set_col="obsID",
+    result = pcc.fit(dc, choice="choice", choice_set_id_col="choice_set_id",
                      encoded_columns=["price_8", "price_10", "brand_B"],
                      price_col="price")
     w_all = result.wtp()
@@ -253,7 +253,7 @@ def test_price_col_none_message_choice():
     df = _simulate_cbc({6: 0.0, 10: -1.0}, {"A": 0.0, "B": 0.4},
                        n_sets=2000, seed=2)
     dc = pcc.encode(df, reference_levels={"price": 10, "brand": "A"})
-    result = pcc.fit(dc, choice="choice", choice_set_col="obsID",
+    result = pcc.fit(dc, choice="choice", choice_set_id_col="choice_set_id",
                      encoded_columns=["price_6", "brand_B"], price_col="price")
     result.price_col = None
     with pytest.raises(ValueError, match="価格列が指定されていません"):
@@ -273,7 +273,7 @@ def test_constructive_matching_choice():
     df["price_range"] = np.where(df["price"] <= 6, "low", "high")
     dc = pcc.encode(df, reference_levels={"price": 10, "brand": "A",
                                           "price_range": "high"})
-    result = pcc.fit(dc, choice="choice", choice_set_col="obsID",
+    result = pcc.fit(dc, choice="choice", choice_set_id_col="choice_set_id",
                      encoded_columns=["price_6", "brand_B", "price_range_low"],
                      price_col="price")
     w = result.wtp()
@@ -320,7 +320,7 @@ def test_encode_keeps_numeric_price_rating():
 
 
 def test_encode_keeps_numeric_price_choice():
-    df = pd.DataFrame({"obsID": [1, 1, 2, 2], "choice": [1, 0, 0, 1],
+    df = pd.DataFrame({"choice_set_id": [1, 1, 2, 2], "choice": [1, 0, 0, 1],
                        "price": [6, 10, 6, 10], "brand": ["A", "B", "A", "B"]})
     out = pcc.encode(df, reference_levels={"price": 10, "brand": "A"})
     assert "price" in out.columns

@@ -24,7 +24,7 @@ rating（評点型）と対称的なAPIを提供する。
     result = pcc.fit(
         df_coded,
         choice="choice",
-        choice_set_col="選択セットID",
+        choice_set_id_col="選択セットID",
         encoded_columns=["price", "brand_hiland", "brand_yoplait"],
     )
     print(result.summary())
