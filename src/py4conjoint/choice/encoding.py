@@ -104,7 +104,7 @@ def encode(
     >>> import pandas as pd
     >>> import py4conjoint.choice as pcc
     >>> df = pd.DataFrame({
-    ...     "選択セットID": [1, 1, 2, 2],
+    ...     "choice_set_id": [1, 1, 2, 2],
     ...     "choice": [1, 0, 0, 1],
     ...     "price": [100, 150, 150, 100],
     ...     "brand": ["A社", "B社", "A社", "B社"],

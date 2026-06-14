@@ -15,7 +15,7 @@ rating（評点型）と対称的なAPIを提供する。
     import py4conjoint.choice as pcc
 
     # df は long形式：1行 = 1つの選択セット内の1つの代替案
-    # 列の例：選択セットID, choice(0/1), price, brand
+    # 列の例：choice_set_id, choice(0/1), price, brand
 
     # ---- 1. ダミーコーディング（基準水準を指定するだけ）----
     df_coded = pcc.encode(df, reference_levels={"brand": "dannon"})
@@ -24,7 +24,7 @@ rating（評点型）と対称的なAPIを提供する。
     result = pcc.fit(
         df_coded,
         choice="choice",
-        choice_set_id_col="選択セットID",
+        choice_set_id_col="choice_set_id",
         encoded_columns=["price", "brand_hiland", "brand_yoplait"],
     )
     print(result.summary())
@@ -41,7 +41,7 @@ from __future__ import annotations
 from .. import __version__
 
 # Forms 回答ファイルの読み込み
-from ._forms import cbc_forms_to_data
+from ._forms import forms_to_data
 
 # 条件付きロジットの推定
 from .analysis import ChoiceConjointResult, fit
@@ -62,7 +62,7 @@ from .plot import plot_importance, plot_partworth, plot_wtp
 
 __all__ = [
     # Forms 読み込み
-    "cbc_forms_to_data",
+    "forms_to_data",
     # 設計
     "design_choice_sets",
     "check_design",

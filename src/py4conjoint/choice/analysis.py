@@ -11,7 +11,7 @@ analysis.py（choice 版）
 >>> result = pcc.fit(
 ...     df_coded,
 ...     choice="choice",
-...     choice_set_id_col="選択セットID",
+...     choice_set_id_col="choice_set_id",
 ...     encoded_columns=["price", "brand_hiland", "brand_yoplait"],
 ... )
 >>> print(result.summary())     # 和文サマリー
@@ -61,11 +61,11 @@ def fit(
     df: pd.DataFrame,
     *,
     choice: str = "choice",
-    choice_set_id_col: str = "選択セットID",
+    choice_set_id_col: str = "choice_set_id",
     encoded_columns: Optional[List[str]] = None,
     reference_levels: Optional[Dict[str, object]] = None,
     price_col: str = "price",
-    respondent_id_col: str = "回答者ID",
+    respondent_id_col: str = "respondent_id",
     cluster_se: bool = True,
 ) -> ChoiceConjointResult:
     """
@@ -94,7 +94,7 @@ def fit(
         被説明変数の列名。選ばれた代替案が ``1``、それ以外が ``0``。
         各選択セットにはちょうど1つの ``1`` が必要。
 
-    choice_set_id_col : str, default "選択セットID"
+    choice_set_id_col : str, default "choice_set_id"
         選択セット（質問）を識別する列名。
         同じIDを持つ行が「同時に提示された代替案の組」を表す。
         選択セットごとの代替案数は揃っていなくてもよい。
@@ -115,7 +115,7 @@ def fit(
         価格列の名前。数値（連続）変数として説明変数に入れることを想定。
         WTP計算で使う。
 
-    respondent_id_col : str, default "回答者ID"
+    respondent_id_col : str, default "respondent_id"
         回答者ID列の名前。クラスタロバスト標準誤差と回答者数診断に使う。
 
     cluster_se : bool, default True
@@ -435,7 +435,7 @@ class ChoiceConjointResult:
     n_obs: int
     n_sets: int
     n_dropped: int = 0
-    respondent_id_col: str = "回答者ID"
+    respondent_id_col: str = "respondent_id"
     se_type: str = "nonrobust"
     converged: bool = True
     n_iter: int = 0
