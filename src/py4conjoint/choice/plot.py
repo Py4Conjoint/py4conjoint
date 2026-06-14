@@ -24,8 +24,9 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 import matplotlib.pyplot as plt
 import pandas as pd
 
-# 日本語フォント設定は rating 版の仕組みをそのまま使う
-from ..rating.plot import _ensure_japanese_font
+# 日本語フォント設定と WTP 描画ロジックは rating 版の仕組みをそのまま使う
+# （rating / choice で挙動を完全に揃えるため、共通実装を共有する）
+from ..rating.plot import _ensure_japanese_font, _plot_wtp_common
 
 if TYPE_CHECKING:
     from .analysis import ChoiceConjointResult
@@ -196,6 +197,8 @@ def plot_wtp(
     show_values: bool = True,
     sort: bool = True,
     price_unit: Optional[str] = None,
+    method: str = "segment",
+    price_segment: Optional[object] = None,
 ):
     """
     各非価格変数の **WTP（限界支払意思額）** を棒グラフで描画する。
@@ -204,6 +207,17 @@ def plot_wtp(
     製品全体に対する支払上限額ではない。
     詳細は :meth:`py4conjoint.choice.ChoiceConjointResult.wtp` の「定義」を参照。
 
+    描画される値は常に :meth:`ChoiceConjointResult.wtp` が返す表と一致する。
+
+    * 価格が2水準（または数値1列）、もしくは ``method="linear"`` のとき：
+      属性ごとに1本の横棒グラフ（``method="linear"`` のときは
+      タイトルに「線形近似」と明示）。
+    * 価格が3水準以上で ``method="segment"``（デフォルト）のとき：
+      価格区間ごとに色分けした **グループ化棒グラフ**。
+      横軸が属性、各属性に価格区間の数だけ縦棒が並び、凡例に価格区間を表示する。
+
+    rating 版（:func:`py4conjoint.rating.plot.plot_wtp`）と挙動は完全に同一。
+
     Parameters
     ----------
     result : ChoiceConjointResult
@@ -211,46 +225,36 @@ def plot_wtp(
     title : str, optional
         省略時は自動生成。
     color : str
+        単一棒グラフ（2水準・線形近似）のときの棒の色。
+        グループ化棒グラフでは価格区間ごとに自動で色分けする。
     show_values : bool, default True
     sort : bool, default True
     price_unit : str, optional
         棒に表示する単位ラベル（例：``"万円"``）。
         省略時は単位なし（数値のみ）。
+    method : {"segment", "linear"}, default "segment"
+        価格3水準以上のとき、区間別（``"segment"``）で描くか
+        線形近似1本（``"linear"``）で描くか。
+        :meth:`ChoiceConjointResult.wtp` の ``method`` と同じ。
+    price_segment : str または (low, high), optional
+        特定の価格区間だけを描画したいときに指定する。
+        :meth:`ChoiceConjointResult.wtp` の ``price_segment`` と同じ。
 
     Returns
     -------
     matplotlib.axes.Axes
     """
-    _ensure_japanese_font()
-    # 棒グラフは属性ごとに1本にするため、線形近似（単一値）の WTP を使う。
-    # 価格区間ごとの WTP は result.wtp() で表として確認できる。
-    wtp = result.wtp(method="linear")
-    if sort:
-        wtp = wtp.sort_values("限界支払意思額")
-
-    if ax is None:
-        fig, ax = plt.subplots(figsize=(7, max(2.5, 0.5 * len(wtp) + 1.5)))
-
-    ax.barh(wtp.index, wtp["限界支払意思額"], color=color)
-    ax.axvline(0, color="gray", linewidth=0.8)
-
-    label_unit = f"（{price_unit}）" if price_unit else ""
-    ax.set_xlabel(f"限界支払意思額{label_unit}")
-    ax.set_title(title or "属性の限界支払意思額")
-
-    if show_values:
-        max_abs = max(abs(wtp["限界支払意思額"]).max(), 1e-9)
-        for y, v in enumerate(wtp["限界支払意思額"]):
-            offset = 0.02 * max_abs
-            x = v + offset if v >= 0 else v - offset
-            ha = "left" if v >= 0 else "right"
-            label = f"{v:.2f}{price_unit or ''}"
-            ax.text(x, y, label, va="center", ha=ha, fontsize=10)
-
-    ax.spines["top"].set_visible(False)
-    ax.spines["right"].set_visible(False)
-    plt.tight_layout()
-    return ax
+    return _plot_wtp_common(
+        result,
+        ax=ax,
+        title=title,
+        color=color,
+        show_values=show_values,
+        sort=sort,
+        price_unit=price_unit,
+        method=method,
+        price_segment=price_segment,
+    )
 
 
 # ---------------------------------------------------------------------------

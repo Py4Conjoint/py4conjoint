@@ -222,6 +222,8 @@ def plot_wtp(
     show_values: bool = True,
     sort: bool = True,
     price_unit: Optional[str] = None,
+    method: str = "segment",
+    price_segment: Optional[object] = None,
 ):
     """
     各非価格属性の **WTP（限界支払意思額）** を棒グラフで描画する。
@@ -230,6 +232,15 @@ def plot_wtp(
     製品全体に対する支払上限額ではない。
     詳細は :meth:`py4conjoint.analysis.ConjointResult.wtp` の「定義」を参照。
 
+    描画される値は常に :meth:`ConjointResult.wtp` が返す表と一致する。
+
+    * 価格が2水準、または ``method="linear"`` のとき：
+      属性ごとに1本の横棒グラフ（``method="linear"`` のときは
+      タイトルに「線形近似」と明示）。
+    * 価格が3水準以上で ``method="segment"``（デフォルト）のとき：
+      価格区間ごとに色分けした **グループ化棒グラフ**。
+      横軸が属性、各属性に価格区間の数だけ縦棒が並び、凡例に価格区間を表示する。
+
     Parameters
     ----------
     result : ConjointResult
@@ -237,20 +248,97 @@ def plot_wtp(
     title : str, optional
         省略時は自動生成。
     color : str
+        単一棒グラフ（2水準・線形近似）のときの棒の色。
+        グループ化棒グラフでは価格区間ごとに自動で色分けする。
     show_values : bool, default True
     sort : bool, default True
     price_unit : str, optional
         棒に表示する単位ラベル（例：``"万円"``）。
         省略時は単位なし（数値のみ）。
+    method : {"segment", "linear"}, default "segment"
+        価格3水準以上のとき、区間別（``"segment"``）で描くか
+        線形近似1本（``"linear"``）で描くか。
+        :meth:`ConjointResult.wtp` の ``method`` と同じ。
+    price_segment : str または (low, high), optional
+        特定の価格区間だけを描画したいときに指定する。
+        :meth:`ConjointResult.wtp` の ``price_segment`` と同じ。
 
     Returns
     -------
     matplotlib.axes.Axes
     """
+    return _plot_wtp_common(
+        result,
+        ax=ax,
+        title=title,
+        color=color,
+        show_values=show_values,
+        sort=sort,
+        price_unit=price_unit,
+        method=method,
+        price_segment=price_segment,
+    )
+
+
+def _plot_wtp_common(
+    result,
+    *,
+    ax=None,
+    title: Optional[str] = None,
+    color: str = "#E45756",
+    show_values: bool = True,
+    sort: bool = True,
+    price_unit: Optional[str] = None,
+    method: str = "segment",
+    price_segment: Optional[object] = None,
+):
+    """
+    rating / choice 共通の WTP 描画ロジック。
+
+    :meth:`wtp` が返す表をそのまま棒グラフ化するため、グラフの数値は
+    常に ``result.wtp(method=..., price_segment=...)`` の表と一致する。
+    """
     _ensure_japanese_font()
-    # 棒グラフは属性ごとに1本にするため、線形近似（単一値）の WTP を使う。
-    # 価格区間ごとの WTP は result.wtp() で表として確認できる。
-    wtp = result.wtp(method="linear")
+    wtp = result.wtp(method=method, price_segment=price_segment)
+    label_unit = f"（{price_unit}）" if price_unit else ""
+
+    # 価格区間列があれば区間別グループ化棒グラフ、なければ単一棒グラフ。
+    if "価格区間" in wtp.columns:
+        return _draw_wtp_grouped(
+            wtp,
+            ax=ax,
+            title=title,
+            show_values=show_values,
+            sort=sort,
+            price_unit=price_unit,
+            label_unit=label_unit,
+        )
+    return _draw_wtp_single(
+        wtp,
+        ax=ax,
+        title=title,
+        color=color,
+        show_values=show_values,
+        sort=sort,
+        price_unit=price_unit,
+        label_unit=label_unit,
+        method=method,
+    )
+
+
+def _draw_wtp_single(
+    wtp: pd.DataFrame,
+    *,
+    ax,
+    title: Optional[str],
+    color: str,
+    show_values: bool,
+    sort: bool,
+    price_unit: Optional[str],
+    label_unit: str,
+    method: str,
+):
+    """属性ごとに1本の横棒グラフ（2水準価格 または 線形近似）。"""
     if sort:
         wtp = wtp.sort_values("限界支払意思額")
 
@@ -260,9 +348,12 @@ def plot_wtp(
     ax.barh(wtp.index, wtp["限界支払意思額"], color=color)
     ax.axvline(0, color="gray", linewidth=0.8)
 
-    label_unit = f"（{price_unit}）" if price_unit else ""
     ax.set_xlabel(f"限界支払意思額{label_unit}")
-    ax.set_title(title or "属性の限界支払意思額")
+    if title is None:
+        title = "属性の限界支払意思額"
+        if method == "linear":
+            title += "（線形近似）"
+    ax.set_title(title)
 
     if show_values:
         max_abs = max(abs(wtp["限界支払意思額"]).max(), 1e-9)
@@ -272,6 +363,83 @@ def plot_wtp(
             ha = "left" if v >= 0 else "right"
             label = f"{v:.2f}{price_unit or ''}"
             ax.text(x, y, label, va="center", ha=ha, fontsize=10)
+
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    plt.tight_layout()
+    return ax
+
+
+def _draw_wtp_grouped(
+    wtp: pd.DataFrame,
+    *,
+    ax,
+    title: Optional[str],
+    show_values: bool,
+    sort: bool,
+    price_unit: Optional[str],
+    label_unit: str,
+):
+    """
+    価格区間ごとに色分けした **グループ化棒グラフ**（縦棒）。
+
+    横軸が属性、各属性に価格区間の数だけ縦棒が並ぶ。凡例に価格区間を表示する。
+    """
+    # 価格区間（昇順を保持）と属性（出現順）を取り出す。
+    segments = list(dict.fromkeys(wtp["価格区間"].tolist()))
+    attrs = list(dict.fromkeys(wtp.index.tolist()))
+
+    # attr × segment の WTP 値を引けるようにする。
+    def _value(attr, seg):
+        sub = wtp[(wtp.index == attr) & (wtp["価格区間"] == seg)]
+        return float(sub["限界支払意思額"].iloc[0]) if len(sub) else 0.0
+
+    if sort:
+        # 区間平均の小さい順に属性を並べる（区間をまたいだ大小比較の目安）。
+        attrs = sorted(
+            attrs,
+            key=lambda a: np.mean([_value(a, s) for s in segments]),
+        )
+
+    x = np.arange(len(attrs))
+    n_seg = max(len(segments), 1)
+    total_width = 0.8
+    bar_width = total_width / n_seg
+    cmap = plt.get_cmap("tab10")
+
+    if ax is None:
+        fig, ax = plt.subplots(
+            figsize=(max(6, 1.4 * len(attrs) + 2), 4.5)
+        )
+
+    all_vals = []
+    for i, seg in enumerate(segments):
+        vals = [_value(a, seg) for a in attrs]
+        all_vals.extend(vals)
+        offset = (i - (n_seg - 1) / 2.0) * bar_width
+        ax.bar(
+            x + offset, vals, bar_width,
+            label=seg, color=cmap(i % 10),
+        )
+        if show_values:
+            for xi, v in zip(x + offset, vals):
+                va = "bottom" if v >= 0 else "top"
+                ax.text(
+                    xi, v, f"{v:.1f}{price_unit or ''}",
+                    ha="center", va=va, fontsize=8, rotation=90,
+                )
+
+    ax.axhline(0, color="gray", linewidth=0.8)
+    ax.set_xticks(x)
+    ax.set_xticklabels(attrs, rotation=30, ha="right")
+    ax.set_ylabel(f"限界支払意思額{label_unit}")
+    ax.set_title(title or "属性の限界支払意思額（価格区間別）")
+    ax.legend(title="価格区間")
+
+    if all_vals:
+        lo, hi = min(all_vals), max(all_vals)
+        pad = 0.18 * max(abs(lo), abs(hi), 1e-9)
+        ax.set_ylim(min(lo, 0) - pad, max(hi, 0) + pad)
 
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)

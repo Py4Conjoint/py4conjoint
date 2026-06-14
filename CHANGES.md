@@ -24,6 +24,7 @@ All notable changes to this project will be documented in this file.
 - `cbc_forms_to_data()` の docstring に、設問文・属性質問内の水準表記（例：`"Apple (iOS)"`）と `design` の水準表記（例：`"apple"`）は一致していなくてよいこと、ただし属性質問の回答を分析に使う場合は利用者側で正規化が必要なことを明記。
 - **価格列の指定を `rating`・`choice` で統一**。両者とも `price_col` には「数値（6, 10 など）が入った数値列のラベル」（例：`"price"`）を渡す。choice で価格をダミーコーディングした場合（`price_6` など）も `price_col` には元の数値列名を渡せばよくなった（従来は数値線形列のみ対応）。どの符号化列が価格かは、数値列の水準と `encode()` の命名規則から **構成的に特定** する。`startswith` による前方一致を使わないため、`price_range_high` のような接頭辞が紛らわしい別属性の列を誤検出しない。
 - `rating`・`choice` の WTP 計算ロジック・列名（`価格区間`）・警告（`wtp_price_linear_approx` は `method="linear"` のときのみ）を共通化。0.3.0 で追加した価格3水準以上の線形近似は `method="linear"` に整理し、デフォルトは区間別（`method="segment"`）にした。
+- `plot_wtp()`（`rating`・`choice` 共通）を `wtp()` の表と **常に一致** するように変更。価格3水準以上のデフォルト（`method="segment"`）では、価格区間ごとに色分けした **グループ化棒グラフ**（横軸=属性、凡例=価格区間）を描く。価格2水準・`method="linear"` のときは従来どおり属性1本の棒グラフ（`method="linear"` ではタイトルに「線形近似」と明示）。`plot_wtp()` に `method`・`price_segment` 引数を追加。従来は内部で `method="linear"` 固定だった。
 - `openpyxl` の下限を `>=3.0` から `>=3.1.5` に引き上げ。古い 3.1.0 系で学生環境のファイル読み込みが不安定になる問題を避けるため。
 
 ### Fixed
