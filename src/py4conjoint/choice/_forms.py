@@ -4,7 +4,7 @@ _forms.py（choice 版）
 Microsoft Forms / Google Forms の回答ファイルを **選択型コンジョイント分析
 （CBC）用の long形式DataFrame** に変換する内部モジュール。
 
-公開APIである :func:`cbc_forms_to_data` は ``py4conjoint.choice`` から
+公開APIである :func:`forms_to_data` は ``py4conjoint.choice`` から
 ``import`` できる。
 
 前提とするアンケート形式
@@ -38,7 +38,7 @@ from ..rating._forms import (
 # 公開API
 # ---------------------------------------------------------------------------
 
-def cbc_forms_to_data(
+def forms_to_data(
     responses_file: str,
     design: pd.DataFrame,
     choice_labels: Sequence[str],
@@ -155,14 +155,15 @@ def cbc_forms_to_data(
     pd.DataFrame
         long形式のDataFrame。1行 = 1回答者の1設問の1代替案。
 
-        列：``choice_set_id``（回答者×設問の通し番号）, ``respondent_id``,
+        列：``respondent_id``, ``choice_set_id``（回答者×設問の通し番号）,
         ``alt``（代替案番号）, ``choice``（選ばれたら1、それ以外0）,
         [回答者属性], + 属性列。
+        （rating 版と同じく、回答者を先頭にした列順。）
 
         そのまま :func:`py4conjoint.choice.encode` →
         :func:`py4conjoint.choice.fit` に渡せる::
 
-            df = pcc.cbc_forms_to_data("responses.xlsx", design, ["A", "B", "C"])
+            df = pcc.forms_to_data("responses.xlsx", design, ["A", "B", "C"])
             df_coded = pcc.encode(df, reference_levels={"brand": "A社"})
             result = pcc.fit(
                 df_coded,
@@ -382,8 +383,10 @@ def cbc_forms_to_data(
                     row[attr] = design_indexed.loc[(choice_set_id, alt_id), attr]
                 rows.append(row)
 
+    # 列順：回答者 → 選択セット → 代替案 → 選択 → 属性（rating 版と同じ思想で
+    # ID系を 回答者→選択セット の順に並べ、データの階層構造を左から表す）
     col_order = (
-        [choice_set_id_colname, respondent_id_colname, alt_colname, choice_colname]
+        [respondent_id_colname, choice_set_id_colname, alt_colname, choice_colname]
         + list(respondent_rename.values())
         + attr_names
     )

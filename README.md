@@ -12,6 +12,10 @@ Microsoft Forms / Google Forms のアンケート回答ファイルを読み込�
 | `py4conjoint.rating` | 評点型 | 製品案を1つずつ採点（例：7点満点） | OLS 回帰 |
 | `py4conjoint.choice` | 選択型（CBC） | 複数の製品案から1つを選ぶ | 条件付きロジット |
 
+どちらの方式も **同じ関数名**（`forms_to_data()`・`encode()`・`fit()` など）を持ち、
+名前空間（`pcr` / `pcc`）で使い分けます。たとえば回答ファイルの読み込みは、評点型なら
+`pcr.forms_to_data(...)`、選択型なら `pcc.forms_to_data(...)` です。
+
 ## インストール
 
 ```bash
@@ -42,16 +46,16 @@ profiles = { # P1         P2       P3        P4
 }
 
 # Microsoft Forms の回答ファイルを読み込む（デフォルト）
-df = pcr.forms_to_conjoint_data(
+df = pcr.forms_to_data(
     responses_file  = "responses.xlsx",
-    attributes      = profiles,
+    profiles        = profiles,
     respondent_cols = {"性別": "gender"},
 )
 
 # Google Forms の場合
-df = pcr.forms_to_conjoint_data(
+df = pcr.forms_to_data(
     responses_file  = "responses.csv",
-    attributes      = profiles,
+    profiles        = profiles,
     respondent_cols = {"性別": "gender"},
     forms           = "google",
 )
@@ -152,7 +156,7 @@ result.plot_wtp(price_unit="万円")  # WTPの棒グラフ
 
 | 関数 / メソッド | 説明 |
 |----------------|------|
-| `forms_to_conjoint_data()` | Microsoft/Google Forms の回答ファイルを long 形式 DataFrame に変換 |
+| `forms_to_data()` | Microsoft/Google Forms の回答ファイルを long 形式 DataFrame に変換 |
 | `design_profiles()` | D 最適計画法によるプロファイル設計 |
 | `check_design()` | プロファイル設計の直交性チェック |
 | `suggest_n_profiles()` | 推奨プロファイル数の目安 |
@@ -220,7 +224,7 @@ pcc.suggest_n_respondents(
 
 ```python
 # 1設問 = 1選択セット。回答選択肢（例：「製品A」「製品B」「製品C」）が代替案
-df = pcc.cbc_forms_to_data(
+df = pcc.forms_to_data(
     responses_file = "responses.xlsx",
     design         = design,
     choice_labels  = ["A", "B", "C"],   # 回答文字列に含まれるラベル（alt_id の順）
@@ -267,6 +271,10 @@ print(result)
 ============================================================
 ```
 
+> 各回答者が同じ設問数に答える設計（バランス済み）では、「選択セット数」行に
+> 内訳が付き `選択セット数（回答者数 × 設問数/人）: 180（30 × 6/人）` のように
+> 表示されます（上のヨーグルトデータは世帯ごとに購買回数が異なるため総数のみ）。
+
 #### 5. 結果を解釈する
 
 ```python
@@ -299,7 +307,7 @@ result.plot_wtp(price_unit="円")  # WTPの棒グラフ
 | `design_choice_sets()` | CBC 用の選択セット生成（完全交差からのランダム割り当て） |
 | `check_design()` | 選択セット設計の診断（バランス・独立性・オーバーラップ） |
 | `suggest_n_respondents()` | Johnson-Orme の経験則による必要回答者数の目安 |
-| `cbc_forms_to_data()` | Microsoft/Google Forms の回答ファイルを long 形式 DataFrame に変換 |
+| `forms_to_data()` | Microsoft/Google Forms の回答ファイルを long 形式 DataFrame に変換 |
 | `encode()` | 属性列をダミーコーディング（0/1）に自動変換 |
 | `fit()` | 条件付きロジットを推定し `ChoiceConjointResult` を返す |
 | `result.summary()` | 係数表・対数尤度・擬似R²・落とし穴チェックの和文サマリー |

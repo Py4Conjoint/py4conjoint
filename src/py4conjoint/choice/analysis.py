@@ -458,6 +458,34 @@ class ChoiceConjointResult:
         """McFadden の擬似決定係数 ``1 − logL / logL0``。"""
         return 1.0 - self.loglik / self.null_loglik
 
+    def _n_sets_row(self) -> tuple:
+        """サマリー用の「選択セット数」行（ラベル, 値）を返す。
+
+        選択セット総数を、回答者数 × 設問数/人（1人あたりの設問数）の内訳付きで
+        表示する。各回答者は1つの版に答えるため、版が複数（n_versions > 1）でも
+        「回答者数 × 設問数/人 = 選択セット総数」が常に成り立つ。
+
+        回答者ID列が無い、または回答者ごとに設問数が異なる（不正な）データでは
+        内訳を付けず、総数のみを返す。
+        """
+        rid = self.respondent_id_col
+        cid = self.choice_set_id_col
+        if (
+            rid
+            and rid in self.df.columns
+            and cid in self.df.columns
+        ):
+            sets_per_resp = self.df.groupby(rid)[cid].nunique()
+            n_resp = int(sets_per_resp.size)
+            # 全回答者で設問数が等しいときのみ内訳を表示（不均衡なら総数のみ）
+            if n_resp > 0 and sets_per_resp.nunique() == 1:
+                per = int(sets_per_resp.iloc[0])
+                return (
+                    "選択セット数（回答者数 × 設問数/人）",
+                    f"{self.n_sets}（{n_resp} × {per}/人）",
+                )
+        return ("選択セット数", str(self.n_sets))
+
     # ---- サマリー ---------------------------------------------------------
 
     def summary(self, *, slim: bool = True) -> str:
@@ -491,7 +519,7 @@ class ChoiceConjointResult:
         )
         stat_rows = [
             ("観測数（行数）",   str(self.n_obs)),
-            ("選択セット数",     str(self.n_sets)),
+            self._n_sets_row(),
             ("説明変数の数",     str(len(self.encoded_columns))),
             ("対数尤度",         f"{self.loglik:.4f}"),
             ("擬似決定係数 R²（McFadden）", f"{self.pseudo_rsquared:.4f}"),
@@ -595,7 +623,7 @@ class ChoiceConjointResult:
         )
         stat_rows = [
             ("観測数（行数）",   str(self.n_obs)),
-            ("選択セット数",     str(self.n_sets)),
+            self._n_sets_row(),
             ("説明変数の数",     str(len(self.encoded_columns))),
             ("対数尤度",         f"{self.loglik:.4f}"),
             ("擬似決定係数 R²（McFadden）", f"{self.pseudo_rsquared:.4f}"),

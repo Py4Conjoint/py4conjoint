@@ -188,3 +188,81 @@ def test_choice_fit_defaults_match_forms_output(tmp_path):
     # 回答者ID列が認識されたので独立性仮定の警告は出ない
     cats = list(result.warnings()["category"].values)
     assert "independence_assumed" not in cats
+
+
+# ---------------------------------------------------------------------------
+# choice の出力列順を rating に統一（回答者を先頭に）
+# ---------------------------------------------------------------------------
+
+def _make_choice_microsoft_xlsx(path, n_resp=3, n_sets=4, seed=0):
+    """Microsoft Forms 形式の選択回答ファイルと対応する design を作る。"""
+    design = pcc.design_choice_sets(
+        {"price": [100, 150, 200], "brand": ["A社", "B社", "C社"]},
+        n_sets=n_sets, n_alts=3, seed=42,
+    )
+    rng = np.random.default_rng(seed)
+    data = {
+        "ID": range(1, n_resp + 1),
+        "Start time": ["2026-06-01 10:00"] * n_resp,
+        "Completion time": ["2026-06-01 10:05"] * n_resp,
+        "Email": ["anonymous"] * n_resp,
+        "Name": [""] * n_resp,
+    }
+    for q in range(n_sets):
+        data[f"Q{q+1}. どの製品を選びますか？"] = list(
+            rng.choice(["製品A", "製品B", "製品C"], size=n_resp)
+        )
+    pd.DataFrame(data).to_excel(path, index=False)
+    return design
+
+
+def test_choice_output_column_order_respondent_first(tmp_path):
+    """choice の出力列順は respondent_id, choice_set_id, alt, choice, ... の順。"""
+    f = tmp_path / "responses.xlsx"
+    design = _make_choice_microsoft_xlsx(f)
+    df = pcc.forms_to_data(str(f), design, ["A", "B", "C"])
+    assert list(df.columns)[:4] == [
+        "respondent_id", "choice_set_id", "alt", "choice"
+    ]
+
+
+def test_rating_choice_id_order_symmetry(tmp_path):
+    """rating / choice とも ID 系を「回答者 → （プロファイル/選択セット）」の順に
+    並べる思想が一致している（両版とも先頭が respondent_id）。"""
+    rf = tmp_path / "rating.xlsx"
+    _make_rating_microsoft_xlsx(rf)
+    rating_df = pcr.forms_to_data(str(rf), PROFILES)
+
+    cf = tmp_path / "choice.xlsx"
+    design = _make_choice_microsoft_xlsx(cf)
+    choice_df = pcc.forms_to_data(str(cf), design, ["A", "B", "C"])
+
+    # 両版とも先頭列は回答者ID
+    assert rating_df.columns[0] == "respondent_id"
+    assert choice_df.columns[0] == "respondent_id"
+    # 2列目はそれぞれの「設問/プロファイル」識別子（概念は別だが位置は対称）
+    assert rating_df.columns[1] == "profile_id"
+    assert choice_df.columns[1] == "choice_set_id"
+
+
+# ---------------------------------------------------------------------------
+# fit() の「選択セット数」表示に内訳（回答者数 × 設問数/人）を付ける
+# ---------------------------------------------------------------------------
+
+def test_fit_summary_shows_choice_set_breakdown(tmp_path):
+    """summary() の選択セット数が「回答者数 × 設問数/人 = 総数」で表示される。"""
+    f = tmp_path / "responses.xlsx"
+    # 回答者10人 × 設問6 → 選択セット総数 60
+    design = _make_choice_microsoft_xlsx(f, n_resp=10, n_sets=6, seed=1)
+    df = pcc.forms_to_data(str(f), design, ["A", "B", "C"])
+    coded = pcc.encode(df, reference_levels={"brand": "A社"})
+    result = pcc.fit(coded)
+
+    text = result.summary()
+    # ラベルに内訳の説明が入る
+    assert "選択セット数（回答者数 × 設問数/人）" in text
+    # 実値：10 × 6/人 = 60
+    assert "60（10 × 6/人）" in text
+    # HTML 表示でも同じ内訳が出る
+    html = result._repr_html_()
+    assert "60（10 × 6/人）" in html

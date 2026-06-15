@@ -1,4 +1,4 @@
-"""choice/_forms.py（cbc_forms_to_data）のテスト。
+"""choice/_forms.py（forms_to_data）のテスト。
 
 Microsoft Forms（.xlsx）/ Google Forms（.csv）の模擬回答ファイルを
 tmp_path に生成して変換を検証する。
@@ -65,11 +65,11 @@ def test_microsoft_happy_path(tmp_path, design):
     f = tmp_path / "responses.xlsx"
     _make_microsoft_xlsx(f, answers)
 
-    df = pcc.cbc_forms_to_data(str(f), design, LABELS)
+    df = pcc.forms_to_data(str(f), design, LABELS)
 
     # 形状：2回答者 × 4設問 × 3代替案
     assert len(df) == 2 * N_SETS * N_ALTS
-    assert list(df.columns) == ["choice_set_id", "respondent_id", "alt", "choice",
+    assert list(df.columns) == ["respondent_id", "choice_set_id", "alt", "choice",
                                 "price", "brand"]
     # choice_set_id は回答者×設問の通し番号（1〜8）、各 choice_set_id に3行
     assert sorted(df["choice_set_id"].unique()) == list(range(1, 9))
@@ -89,7 +89,7 @@ def test_google_happy_path(tmp_path, design):
     answers = [["製品A", "製品B", "製品C", "製品A"]]
     f = tmp_path / "responses.csv"
     _make_google_csv(f, answers)
-    df = pcc.cbc_forms_to_data(str(f), design, LABELS, forms="google")
+    df = pcc.forms_to_data(str(f), design, LABELS, forms="google")
     assert len(df) == 1 * N_SETS * N_ALTS
     assert (df.groupby("choice_set_id")["choice"].sum() == 1).all()
 
@@ -101,7 +101,7 @@ def test_respondent_cols(tmp_path, design):
     ]
     f = tmp_path / "responses.xlsx"
     _make_microsoft_xlsx(f, answers, extra_cols={"性別": ["男", "女"]})
-    df = pcc.cbc_forms_to_data(
+    df = pcc.forms_to_data(
         str(f), design, LABELS, respondent_cols={"性別": "gender"}
     )
     assert "gender" in df.columns
@@ -110,7 +110,7 @@ def test_respondent_cols(tmp_path, design):
 
 
 def test_end_to_end_encode_fit(tmp_path, design):
-    """cbc_forms_to_data → encode → fit がそのまま流れることを確認する。"""
+    """forms_to_data → encode → fit がそのまま流れることを確認する。"""
     rng = np.random.default_rng(0)
     answers = [
         [f"製品{rng.choice(LABELS)}" for _ in range(N_SETS)]
@@ -118,7 +118,7 @@ def test_end_to_end_encode_fit(tmp_path, design):
     ]
     f = tmp_path / "responses.xlsx"
     _make_microsoft_xlsx(f, answers)
-    df = pcc.cbc_forms_to_data(str(f), design, LABELS)
+    df = pcc.forms_to_data(str(f), design, LABELS)
     df_coded = pcc.encode(df, reference_levels={"brand": "A社"})
     result = pcc.fit(
         df_coded,
@@ -140,7 +140,7 @@ def test_n_sets_mismatch_error(tmp_path):
     f = tmp_path / "responses.xlsx"
     _make_microsoft_xlsx(f, answers)
     with pytest.raises(ValueError, match="設問数.*一致しません"):
-        pcc.cbc_forms_to_data(str(f), design_small, LABELS)
+        pcc.forms_to_data(str(f), design_small, LABELS)
 
 
 def test_unmatched_answer_error(tmp_path, design):
@@ -148,7 +148,7 @@ def test_unmatched_answer_error(tmp_path, design):
     f = tmp_path / "responses.xlsx"
     _make_microsoft_xlsx(f, answers)
     with pytest.raises(ValueError, match="マッチしない回答値"):
-        pcc.cbc_forms_to_data(str(f), design, LABELS)
+        pcc.forms_to_data(str(f), design, LABELS)
 
 
 def test_unanswered_warning_and_drop(tmp_path, design):
@@ -159,7 +159,7 @@ def test_unanswered_warning_and_drop(tmp_path, design):
     f = tmp_path / "responses.xlsx"
     _make_microsoft_xlsx(f, answers)
     with pytest.warns(UserWarning, match="未回答の設問が 1 件"):
-        df = pcc.cbc_forms_to_data(str(f), design, LABELS)
+        df = pcc.forms_to_data(str(f), design, LABELS)
     # 未回答の選択セットは除外される：(2人×4設問 − 1) × 3代替案
     assert len(df) == (2 * N_SETS - 1) * N_ALTS
     # choice_set_id は欠番なく連番
@@ -170,23 +170,23 @@ def test_choice_labels_length_error(tmp_path, design):
     f = tmp_path / "responses.xlsx"
     _make_microsoft_xlsx(f, [["製品A", "製品B", "製品C", "製品A"]])
     with pytest.raises(ValueError, match="choice_labels の長さ"):
-        pcc.cbc_forms_to_data(str(f), design, ["A", "B"])
+        pcc.forms_to_data(str(f), design, ["A", "B"])
 
 
 def test_invalid_version_error(tmp_path, design):
     f = tmp_path / "responses.xlsx"
     _make_microsoft_xlsx(f, [["製品A", "製品B", "製品C", "製品A"]])
     with pytest.raises(ValueError, match="バージョン 2 が存在しません"):
-        pcc.cbc_forms_to_data(str(f), design, LABELS, version=2)
+        pcc.forms_to_data(str(f), design, LABELS, version=2)
 
 
 def test_file_not_found(design):
     with pytest.raises(FileNotFoundError, match="ファイルが見つかりません"):
-        pcc.cbc_forms_to_data("no_such_file.xlsx", design, LABELS)
+        pcc.forms_to_data("no_such_file.xlsx", design, LABELS)
 
 
 def test_invalid_forms_error(tmp_path, design):
     f = tmp_path / "responses.xlsx"
     _make_microsoft_xlsx(f, [["製品A", "製品B", "製品C", "製品A"]])
     with pytest.raises(ValueError, match="無効な値"):
-        pcc.cbc_forms_to_data(str(f), design, LABELS, forms="yahoo")
+        pcc.forms_to_data(str(f), design, LABELS, forms="yahoo")

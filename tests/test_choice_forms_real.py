@@ -1,4 +1,4 @@
-"""実 Microsoft Forms 出力での cbc_forms_to_data() 検証。
+"""実 Microsoft Forms 出力での forms_to_data() 検証。
 
 リハーサルで回収した実ファイル（3人分の回答）を使い、
 - 列名が長文（改行・全角空白・\\xa0 を含む）でも設問列を検出できること
@@ -59,13 +59,13 @@ def test_design_csv_has_no_version_column(design):
 
 def test_real_forms_runs_and_shape(design):
     """実ファイルが例外なく long 形式に変換され、形状が正しい。"""
-    df = pcc.cbc_forms_to_data(str(RESPONSES), design, LABELS, forms="microsoft")
+    df = pcc.forms_to_data(str(RESPONSES), design, LABELS, forms="microsoft")
 
     # (a) 行数 = 3人 × 6設問 × 3代替案 = 54
     assert len(df) == N_RESP * N_SETS * N_ALTS == 54
-    # 出力列：choice_set_id, respondent_id, alt, choice + 属性列
+    # 出力列：respondent_id, choice_set_id, alt, choice + 属性列
     assert list(df.columns) == [
-        "choice_set_id", "respondent_id", "alt", "choice", "price", "os", "camera"
+        "respondent_id", "choice_set_id", "alt", "choice", "price", "os", "camera"
     ]
     # (b) choice の合計 = 3 × 6 = 18（各回答者×設問でちょうど1つ choice=1）
     assert df["choice"].sum() == N_RESP * N_SETS == 18
@@ -77,7 +77,7 @@ def test_real_forms_runs_and_shape(design):
 
 def test_real_forms_choices_match_answer_key(design):
     """(d) 3人分の選択が実回答の正解表と一致する。"""
-    df = pcc.cbc_forms_to_data(str(RESPONSES), design, LABELS, forms="microsoft")
+    df = pcc.forms_to_data(str(RESPONSES), design, LABELS, forms="microsoft")
 
     chosen = (
         df[df["choice"] == 1]
@@ -89,7 +89,7 @@ def test_real_forms_choices_match_answer_key(design):
 
 def test_real_forms_attributes_match_design(design):
     """選ばれた代替案の属性が設計CSVの水準と一致する。"""
-    df = pcc.cbc_forms_to_data(str(RESPONSES), design, LABELS, forms="microsoft")
+    df = pcc.forms_to_data(str(RESPONSES), design, LABELS, forms="microsoft")
     design_indexed = design.set_index(["choice_set_id", "alt_id"])
 
     # choice_set_id 1 = 回答者1の設問1。製品B(alt2)が選ばれている。
@@ -107,7 +107,7 @@ def test_real_forms_keep_attribute_questions_via_respondent_cols(design):
     gender_col = next(c for c in raw.columns if c.startswith("あなたの性別"))
     os_col = next(c for c in raw.columns if c.startswith("現在使っている"))
 
-    df = pcc.cbc_forms_to_data(
+    df = pcc.forms_to_data(
         str(RESPONSES),
         design,
         LABELS,
@@ -124,7 +124,7 @@ def test_real_forms_keep_attribute_questions_via_respondent_cols(design):
 
 def test_real_forms_pipeline_to_encode(design):
     """実データが encode までそのまま流れる（fit に渡せる形になる）。"""
-    df = pcc.cbc_forms_to_data(str(RESPONSES), design, LABELS, forms="microsoft")
+    df = pcc.forms_to_data(str(RESPONSES), design, LABELS, forms="microsoft")
     df_coded = pcc.encode(df, reference_levels={"os": "android", "camera": "標準"})
     # ダミー列が追加され、choice_set_id/choice はそのまま残る
     assert "os_apple" in df_coded.columns
@@ -138,13 +138,13 @@ def test_real_forms_pipeline_to_encode(design):
 
 def test_google_forms_runs_and_shape(design):
     """Google Forms の CSV（BOMなしUTF-8）が同じ design・labels で変換できる。"""
-    df = pcc.cbc_forms_to_data(
+    df = pcc.forms_to_data(
         str(GOOGLE_RESPONSES), design, LABELS, forms="google"
     )
     # 出力54行（3人 × 6設問 × 3代替案）、列も Microsoft 版と同じ
     assert len(df) == N_RESP * N_SETS * N_ALTS == 54
     assert list(df.columns) == [
-        "choice_set_id", "respondent_id", "alt", "choice", "price", "os", "camera"
+        "respondent_id", "choice_set_id", "alt", "choice", "price", "os", "camera"
     ]
     # choice 合計 = 18、各 choice_set_id でちょうど1つ choice=1、choice_set_id は 18 通り
     assert df["choice"].sum() == N_RESP * N_SETS == 18
@@ -154,7 +154,7 @@ def test_google_forms_runs_and_shape(design):
 
 def test_google_forms_choices_match_answer_key(design):
     """Google 版の選択が正解表と一致する（【設問N】接頭辞の有無に依存しない）。"""
-    df = pcc.cbc_forms_to_data(
+    df = pcc.forms_to_data(
         str(GOOGLE_RESPONSES), design, LABELS, forms="google"
     )
     chosen = df[df["choice"] == 1].set_index("choice_set_id")["alt"].to_dict()
@@ -167,7 +167,7 @@ def test_google_forms_keep_attribute_questions(design):
     gender_col = next(c for c in raw.columns if "性別" in c)
     os_col = next(c for c in raw.columns if "OS" in c)
 
-    df = pcc.cbc_forms_to_data(
+    df = pcc.forms_to_data(
         str(GOOGLE_RESPONSES),
         design,
         LABELS,
