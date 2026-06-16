@@ -39,7 +39,7 @@ def make_synthetic_data(seed: int = 0, n_resp: int = 30) -> pd.DataFrame:
             u += 1.2 if row["camera"] == "高性能" else -1.2
             u += rng.normal(0, 0.5)
             rating = int(np.clip(round(u), 1, 7))
-            rows.append({"回答者ID": r, "プロファイルID": cid, "rating": rating, **row})
+            rows.append({"respondent_id": r, "profile_id": cid, "rating": rating, **row})
     return pd.DataFrame(rows)
 
 
@@ -220,7 +220,7 @@ def test_diagnostics_price_insignificant():
             tiny_price_ef = 0.001 * (1 if price_vals[i] == 6 else -1)  # 極小、事実上ゼロ
             rating = float(np.clip(4.0 + os_effect + resp_offset + tiny_price_ef, 1, 7))
             rows.append({
-                "回答者ID": r, "プロファイルID": cid, "rating": rating,
+                "respondent_id": r, "profile_id": cid, "rating": rating,
                 "price": price_vals[i], "os": os_vals[i],
             })
     df = pd.DataFrame(rows)
@@ -335,9 +335,9 @@ def test_e2e_real_data():
     )
 
     # フルパイプライン
-    df = pc.forms_to_conjoint_data(
+    df = pc.forms_to_data(
         responses_file=str(csv),
-        attributes=profiles,
+        profiles=profiles,
         forms="google",
     )
     df = pc.encode(df, reference_levels={"price": 10, "os": "android", "camera": "標準"})
@@ -349,8 +349,8 @@ def test_e2e_real_data():
 
     # ノートブック方式（手動符号化 + 通常OLS）と係数が一致
     # （クラスタSEは標準誤差のみ変え、係数の推定値は変えない）
-    df_nb = pc.forms_to_conjoint_data(
-        responses_file=str(csv), attributes=profiles, forms="google"
+    df_nb = pc.forms_to_data(
+        responses_file=str(csv), profiles=profiles, forms="google"
     )
     df_nb["price_low"]   = df_nb["price"].map({10: -1, 6: 1})
     df_nb["os_apple"]    = df_nb["os"].map({"android": -1, "apple": 1})
@@ -473,7 +473,7 @@ def test_price_sign_negative():
         for price, os in [(6, "android"), (10, "android"), (6, "apple"), (10, "apple")]:
             luxury_effect = 2.0 if price == 10 else -2.0
             rating = float(np.clip(4.0 + luxury_effect + rng.normal(0, 0.3), 1, 7))
-            rows.append({"回答者ID": r, "price": price, "os": os, "rating": rating})
+            rows.append({"respondent_id": r, "price": price, "os": os, "rating": rating})
     df = pd.DataFrame(rows)
     # 高い方を基準 → price_0=+1 が price=6（安い方）→ luxury では b_price < 0
     df_coded = pc.encode(df, reference_levels={"price": 10, "os": "android"})
@@ -751,7 +751,7 @@ def test_wtp_three_level_price_no_extra_columns():
             u += 0.7 if os == "apple" else -0.7
             u += rng.normal(0, 0.3)
             rating = int(np.clip(round(u), 1, 7))
-            rows.append({"回答者ID": r, "rating": rating, "price": price, "os": os})
+            rows.append({"respondent_id": r, "rating": rating, "price": price, "os": os})
     df = pd.DataFrame(rows)
     df_coded = pc.encode(
         df,
@@ -785,7 +785,7 @@ def test_wtp_three_level_price():
             u += 0.7 if os == "apple" else -0.7
             u += rng.normal(0, 0.3)
             rating = int(np.clip(round(u), 1, 7))
-            rows.append({"回答者ID": r, "rating": rating, "price": price, "os": os})
+            rows.append({"respondent_id": r, "rating": rating, "price": price, "os": os})
     df = pd.DataFrame(rows)
     df_coded = pc.encode(
         df,
@@ -1019,7 +1019,7 @@ def _make_mixed_level_data(seed: int = 10, n_resp: int = 20) -> pd.DataFrame:
                     u += rng.normal(0, 0.4)
                     rating = int(np.clip(round(u), 1, 7))
                     rows.append({
-                        "回答者ID": r, "rating": rating,
+                        "respondent_id": r, "rating": rating,
                         "price": price, "os": os, "camera": cam,
                     })
     return pd.DataFrame(rows)
@@ -1204,7 +1204,7 @@ def test_wtp_p_price_three_levels_joint_f_test():
             u = 4.0 + {6: 1.5, 8: 0.0, 10: -1.5}[price]
             u += 0.7 if os == "apple" else -0.7
             u += rng.normal(0, 0.3)
-            rows.append({"回答者ID": r, "rating": int(np.clip(round(u), 1, 7)),
+            rows.append({"respondent_id": r, "rating": int(np.clip(round(u), 1, 7)),
                          "price": price, "os": os})
     df = pd.DataFrame(rows)
     df_coded = pc.encode(
@@ -1289,7 +1289,7 @@ def test_unit_rating_money_three_level_price():
             u += 0.7 if os == "apple" else -0.7
             u += rng.normal(0, 0.3)
             rating = int(np.clip(round(u), 1, 7))
-            rows.append({"回答者ID": r, "rating": rating, "price": price, "os": os})
+            rows.append({"respondent_id": r, "rating": rating, "price": price, "os": os})
     df = pd.DataFrame(rows)
     df_coded = pc.encode(
         df,
@@ -1321,7 +1321,7 @@ def test_wtp_three_level_price_warnings_not_duplicated():
             u += 0.7 if os == "apple" else -0.7
             u += rng.normal(0, 0.3)
             rating = int(np.clip(round(u), 1, 7))
-            rows.append({"回答者ID": r, "rating": rating, "price": price, "os": os})
+            rows.append({"respondent_id": r, "rating": rating, "price": price, "os": os})
     df = pd.DataFrame(rows)
     df_coded = pc.encode(
         df,

@@ -62,7 +62,7 @@ def _make_rating_3level(seed=42, n_resp=30):
                 u = 4.0 + {6: 1.5, 8: 1.0, 10: -1.5}[price]
                 u += 0.7 if os == "apple" else -0.7
                 u += rng.normal(0, 0.3)
-                rows.append({"回答者ID": r, "rating": int(np.clip(round(u), 1, 7)),
+                rows.append({"respondent_id": r, "rating": int(np.clip(round(u), 1, 7)),
                              "price": price, "os": os})
     return pd.DataFrame(rows)
 

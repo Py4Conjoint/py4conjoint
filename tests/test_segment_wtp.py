@@ -53,7 +53,7 @@ def _make_rating_3level(seed=42, n_resp=25):
                 u = 4.0 + {6: 1.5, 8: 1.0, 10: -1.5}[price]  # 非線形（8→10で急落）
                 u += 0.7 if os == "apple" else -0.7
                 u += rng.normal(0, 0.3)
-                rows.append({"回答者ID": r, "rating": int(np.clip(round(u), 1, 7)),
+                rows.append({"respondent_id": r, "rating": int(np.clip(round(u), 1, 7)),
                              "price": price, "os": os})
     return pd.DataFrame(rows)
 
@@ -189,7 +189,7 @@ def test_rating_2level_matches_legacy_formula():
                 u = 4.0 + (1.0 if price == 6 else -1.0)
                 u += 0.7 if os == "apple" else -0.7
                 u += rng.normal(0, 0.3)
-                rows.append({"回答者ID": r, "rating": int(np.clip(round(u), 1, 7)),
+                rows.append({"respondent_id": r, "rating": int(np.clip(round(u), 1, 7)),
                              "price": price, "os": os})
     df = pd.DataFrame(rows)
     dc = pc.encode(df, reference_levels={"price": 10, "os": "android"})
@@ -293,7 +293,7 @@ def test_constructive_matching_rating():
                 u = 4.0 + (1.0 if price == 6 else -1.0)
                 u += 0.5 if grade == "A" else -0.5
                 u += rng.normal(0, 0.3)
-                rows.append({"回答者ID": r, "rating": int(np.clip(round(u), 1, 7)),
+                rows.append({"respondent_id": r, "rating": int(np.clip(round(u), 1, 7)),
                              "price": price, "price_grade": grade})
     df = pd.DataFrame(rows)
     dc = pc.encode(df, reference_levels={"price": 10, "price_grade": "B"})

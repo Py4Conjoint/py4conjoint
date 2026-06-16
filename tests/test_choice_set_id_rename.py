@@ -1,6 +1,6 @@
 """選択セット識別子を choice_set_id 系に統一した改名の検証。
 
-- design_choice_sets() と cbc_forms_to_data() が **同じ列名** choice_set_id を
+- design_choice_sets() と forms_to_data() が **同じ列名** choice_set_id を
   出力すること（生成側・設計側で名前がねじれていないこと）。
 - fit() が choice_set_id_col 引数を受け取って動くこと。
 - 旧名（set_id 出力・obsID 出力・choice_set_col 引数）がもう存在しないこと。
@@ -59,7 +59,7 @@ def test_forms_outputs_choice_set_id(tmp_path, design):
     ]
     f = tmp_path / "responses.xlsx"
     _make_microsoft_xlsx(f, answers)
-    df = pcc.cbc_forms_to_data(str(f), design, LABELS)
+    df = pcc.forms_to_data(str(f), design, LABELS)
     assert "choice_set_id" in df.columns
     # 旧名 obsID は残っていない
     assert "obsID" not in df.columns
@@ -70,7 +70,7 @@ def test_design_and_forms_use_same_set_identifier(tmp_path, design):
     answers = [["製品A", "製品B", "製品C", "製品A"]]
     f = tmp_path / "responses.xlsx"
     _make_microsoft_xlsx(f, answers)
-    df = pcc.cbc_forms_to_data(str(f), design, LABELS)
+    df = pcc.forms_to_data(str(f), design, LABELS)
     set_id_col = "choice_set_id"
     assert set_id_col in design.columns
     assert set_id_col in df.columns

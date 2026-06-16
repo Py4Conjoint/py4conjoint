@@ -154,7 +154,7 @@ def fit(
     reference_levels: Optional[Dict[str, object]] = None,
     price_col: str = "price",
     formula: Optional[str] = None,
-    respondent_id_col: str = "回答者ID",
+    respondent_id_col: str = "respondent_id",
     cluster_se: bool = True,
 ) -> "ConjointResult":
     """
@@ -201,8 +201,8 @@ def fit(
         右辺から自動取得される（``rating``・``encoded_columns`` 引数は
         無視される）。通常は省略してよい（自動構築される）。
 
-    respondent_id_col : str, default "回答者ID"
-        回答者ID列の名前（:func:`forms_to_conjoint_data` のデフォルト列名と同じ）。
+    respondent_id_col : str, default "respondent_id"
+        回答者ID列の名前（:func:`forms_to_data` のデフォルト列名と同じ）。
         クラスタロバスト標準誤差のグループ化と、回答者数の診断
         （``few_respondents``）に使う。
 
@@ -377,7 +377,7 @@ def check_design(
     """
     アンケート実施前にプロファイルの直交性を診断する。
 
-    fit() の前、forms_to_conjoint_data() の前に呼ぶことを想定。
+    fit() の前、forms_to_data() の前に呼ぶことを想定。
     scipy は不要（numpy・pandas のみで計算）。
 
     Parameters
@@ -487,7 +487,7 @@ class ConjointResult:
     price_col: str
     n_dropped: int = 0
     alias_map: Dict[str, str] = field(default_factory=dict)
-    respondent_id_col: str = "回答者ID"
+    respondent_id_col: str = "respondent_id"
     se_type: str = "nonrobust"
 
     # 内部用：検出された警告（落とし穴）のリスト
@@ -1399,7 +1399,7 @@ class ConjointResult:
 
         4. **few_respondents**（重大度：大 or 中）
            回答者が1人なら「大」、2〜4人なら「中」。
-           ``回答者ID`` 列がある場合のみ判定する。
+           ``respondent_id`` 列がある場合のみ判定する。
 
         5. **independence_assumed**（重大度：中）
            回答者ID列が見つからず、観測の独立性を仮定した通常の標準誤差を

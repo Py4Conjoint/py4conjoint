@@ -54,7 +54,7 @@ def encode(
     Parameters
     ----------
     df : pd.DataFrame
-        ``forms_to_conjoint_data`` の出力など、long形式のデータ。
+        ``forms_to_data`` の出力など、long形式のデータ。
         各プロファイルの属性が列として入っていることを前提とする。
 
     reference_levels : dict

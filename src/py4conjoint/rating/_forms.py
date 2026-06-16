@@ -4,7 +4,7 @@ _forms.py
 Microsoft Forms / Google Forms の回答ファイルを評点型コンジョイント分析用の
 long形式DataFrameに変換する内部モジュール。
 
-公開APIである :func:`forms_to_conjoint_data` はトップレベル
+公開APIである :func:`forms_to_data` はトップレベル
 （``py4conjoint`` パッケージ）から ``import`` できる。
 """
 
@@ -22,17 +22,17 @@ import pandas as pd
 # 公開API
 # ---------------------------------------------------------------------------
 
-def forms_to_conjoint_data(
+def forms_to_data(
     responses_file: str,
-    attributes: "pd.DataFrame | Dict[str, Sequence]",
+    profiles: "pd.DataFrame | Dict[str, Sequence]",
     *,
     n_profiles: Optional[int] = None,
     forms: Literal["microsoft", "google"] = "microsoft",
     respondent_cols: Optional[Dict[str, str]] = None,
     profile_id_prefix: str = "P",
     rating_colname: str = "rating",
-    respondent_id_colname: str = "回答者ID",
-    profile_id_colname: str = "プロファイルID",
+    respondent_id_colname: str = "respondent_id",
+    profile_id_colname: str = "profile_id",
     out_csv: Optional[str] = None,
 ) -> pd.DataFrame:
     """
@@ -44,7 +44,7 @@ def forms_to_conjoint_data(
         Forms からダウンロードした回答ファイルのパス。
         Microsoft Forms の場合は .xlsx、Google Forms の場合は .csv。
 
-    attributes : pd.DataFrame または dict
+    profiles : pd.DataFrame または dict
         プロファイル設計を指定する。以下の2形式を受け付ける。
 
         【形式A：DataFrameをそのまま渡す（推奨）】
@@ -59,7 +59,7 @@ def forms_to_conjoint_data(
                 "camera": ["標準", "標準", "高性能", "高性能"],
             }, index=["P1", "P2", "P3", "P4"])
 
-            df = pc.forms_to_conjoint_data(responses_file, profiles)
+            df = pc.forms_to_data(responses_file, profiles)
 
         【形式B：辞書】
             属性名をキー、プロファイル順の水準リストを値とする辞書。
@@ -71,11 +71,11 @@ def forms_to_conjoint_data(
                 "camera": ["標準", "標準", "高性能", "高性能"],
             }
 
-            df = pc.forms_to_conjoint_data(responses_file, profiles)
+            df = pc.forms_to_data(responses_file, profiles)
 
     n_profiles : int, optional
         アンケートで提示したプロファイルの枚数。
-        省略時は attributes の水準リストの長さから自動推測する。
+        省略時は profiles の水準リストの長さから自動推測する。
         例：4
 
     forms : {"microsoft", "google"}, default "microsoft"
@@ -95,10 +95,10 @@ def forms_to_conjoint_data(
     rating_colname : str, default "rating"
         出力DataFrameの評点列名。
 
-    respondent_id_colname : str, default "回答者ID"
+    respondent_id_colname : str, default "respondent_id"
         出力DataFrameの回答者ID列名。
 
-    profile_id_colname : str, default "プロファイルID"
+    profile_id_colname : str, default "profile_id"
         出力DataFrameのプロファイルID列名。
 
     out_csv : str, optional
@@ -109,7 +109,7 @@ def forms_to_conjoint_data(
     -------
     pd.DataFrame
         long形式のDataFrame。
-        列：回答者ID, プロファイルID, rating, [回答者属性], [プロファイル属性]
+        列：respondent_id, profile_id, rating, [回答者属性], [プロファイル属性]
 
     Raises
     ------
@@ -125,7 +125,7 @@ def forms_to_conjoint_data(
     # 0. 入力チェック
     # ------------------------------------------------------------------
     if n_profiles is None:
-        n_profiles = _infer_n_profiles(attributes)
+        n_profiles = _infer_n_profiles(profiles)
 
     if forms not in ("microsoft", "google"):
         raise ValueError(
@@ -133,8 +133,8 @@ def forms_to_conjoint_data(
             "'microsoft' または 'google' を指定してください。"
         )
 
-    attributes = _normalize_attributes(attributes, n_profiles)
-    _check_attributes(attributes, n_profiles)
+    profiles = _normalize_profiles(profiles, n_profiles)
+    _check_profiles(profiles, n_profiles)
 
     csv_path = Path(responses_file)
     if not csv_path.exists():
@@ -218,13 +218,13 @@ def forms_to_conjoint_data(
     # ------------------------------------------------------------------
     # 6. プロファイル設計（属性・水準）をマージ
     # ------------------------------------------------------------------
-    profile_design = _build_profile_design(profile_ids, attributes, profile_id_colname)
+    profile_design = _build_profile_design(profile_ids, profiles, profile_id_colname)
     df_long = df_long.merge(profile_design, on=profile_id_colname)
 
     # ------------------------------------------------------------------
-    # 7. 列順を整理：回答者ID, プロファイルID, rating, 回答者属性, プロファイル属性
+    # 7. 列順を整理：respondent_id, profile_id, rating, 回答者属性, プロファイル属性
     # ------------------------------------------------------------------
-    attr_names = [list(a.keys())[0] for a in attributes]
+    attr_names = [list(a.keys())[0] for a in profiles]
     col_order = (
         [respondent_id_colname, profile_id_colname, rating_colname]
         + respondent_dst_cols
@@ -387,70 +387,70 @@ def _is_coercible_to_numeric(series: pd.Series) -> bool:
 
 def _build_profile_design(
     profile_ids: List[str],
-    attributes: Sequence[Dict[str, Sequence]],
+    profiles: Sequence[Dict[str, Sequence]],
     profile_id_colname: str,
 ) -> pd.DataFrame:
     """プロファイルID と属性・水準の対応テーブルを作成する。"""
     data: Dict[str, list] = {profile_id_colname: profile_ids}
-    for attr_dict in attributes:
+    for attr_dict in profiles:
         attr_name, levels = list(attr_dict.items())[0]
         data[attr_name] = list(levels)
     return pd.DataFrame(data)
 
 
 def _infer_n_profiles(
-    attributes: "pd.DataFrame | Dict[str, Sequence]",
+    profiles: "pd.DataFrame | Dict[str, Sequence]",
 ) -> int:
-    """attributes の水準リスト長からプロファイル数を推測する。"""
-    if isinstance(attributes, pd.DataFrame):
-        return len(attributes)
-    if isinstance(attributes, dict):
-        if not attributes:
-            raise ValueError("attributes が空です。少なくとも1つの属性を指定してください。")
-        return len(next(iter(attributes.values())))
+    """profiles の水準リスト長からプロファイル数を推測する。"""
+    if isinstance(profiles, pd.DataFrame):
+        return len(profiles)
+    if isinstance(profiles, dict):
+        if not profiles:
+            raise ValueError("profiles が空です。少なくとも1つの属性を指定してください。")
+        return len(next(iter(profiles.values())))
     raise TypeError(
-        f"attributes は pd.DataFrame または dict を指定してください。\n"
-        f"  受け取った型: {type(attributes).__name__}"
+        f"profiles は pd.DataFrame または dict を指定してください。\n"
+        f"  受け取った型: {type(profiles).__name__}"
     )
 
 
-def _normalize_attributes(
-    attributes: "pd.DataFrame | Dict[str, Sequence]",
+def _normalize_profiles(
+    profiles: "pd.DataFrame | Dict[str, Sequence]",
     n_profiles: int,
 ) -> "List[Dict[str, list]]":
     """
-    attributes を内部処理用の「辞書のリスト」形式に統一する。
+    profiles を内部処理用の「辞書のリスト」形式に統一する。
 
     - pd.DataFrame → 列ごとに {列名: 値リスト} の辞書に変換する
     - dict → [{属性名: 値リスト}, ...] に変換する
     """
-    if isinstance(attributes, pd.DataFrame):
-        if len(attributes) != n_profiles:
+    if isinstance(profiles, pd.DataFrame):
+        if len(profiles) != n_profiles:
             raise ValueError(
-                f"attributes の行数 ({len(attributes)}) が "
+                f"profiles の行数 ({len(profiles)}) が "
                 f"n_profiles ({n_profiles}) と一致しません。"
             )
         return [
-            {col: list(attributes[col])}
-            for col in attributes.columns
+            {col: list(profiles[col])}
+            for col in profiles.columns
         ]
-    if isinstance(attributes, dict):
-        return [{k: list(v)} for k, v in attributes.items()]
+    if isinstance(profiles, dict):
+        return [{k: list(v)} for k, v in profiles.items()]
     raise TypeError(
-        f"attributes は pd.DataFrame または dict を指定してください。\n"
-        f"  受け取った型: {type(attributes).__name__}"
+        f"profiles は pd.DataFrame または dict を指定してください。\n"
+        f"  受け取った型: {type(profiles).__name__}"
     )
 
 
-def _check_attributes(
-    attributes: "List[Dict[str, list]]",
+def _check_profiles(
+    profiles: "List[Dict[str, list]]",
     n_profiles: int,
 ) -> None:
-    """attributes の構造と水準数を検証する。"""
-    if not attributes:
-        raise ValueError("attributes が空です。少なくとも1つの属性を指定してください。")
+    """profiles の構造と水準数を検証する。"""
+    if not profiles:
+        raise ValueError("profiles が空です。少なくとも1つの属性を指定してください。")
 
-    if len(attributes) == 1:
+    if len(profiles) == 1:
         warnings.warn(
             "属性が1つしかありません。\n"
             "属性が1つの場合、複数属性間のトレードオフが測れないため、\n"
@@ -461,10 +461,10 @@ def _check_attributes(
             stacklevel=3,
         )
 
-    for i, attr_dict in enumerate(attributes):
+    for i, attr_dict in enumerate(profiles):
         if not isinstance(attr_dict, dict) or len(attr_dict) != 1:
             raise ValueError(
-                f"attributes[{i}] は キー1つの辞書である必要があります。\n"
+                f"profiles[{i}] は キー1つの辞書である必要があります。\n"
                 f"例：{{\"price\": [6, 10, 6, 10]}}\n"
                 f"実際の値：{attr_dict}"
             )

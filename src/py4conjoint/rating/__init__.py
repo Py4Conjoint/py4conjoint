@@ -9,7 +9,7 @@ from __future__ import annotations
 from .. import __version__
 
 # データ作成
-from ._forms import forms_to_conjoint_data
+from ._forms import forms_to_data
 
 # プロファイル設計
 from .design import design_profiles, suggest_n_profiles
@@ -25,7 +25,7 @@ from .plot import plot_importance, plot_partworth, plot_wtp
 
 __all__ = [
     # データ作成
-    "forms_to_conjoint_data",
+    "forms_to_data",
     # プロファイル設計
     "design_profiles",
     "suggest_n_profiles",
