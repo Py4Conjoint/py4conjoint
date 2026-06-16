@@ -22,6 +22,7 @@ rating 版（:mod:`py4conjoint.rating.design`）と対称的なAPIを提供す�
 """
 from __future__ import annotations
 
+import hashlib
 import math
 from dataclasses import dataclass
 from itertools import product as _itertools_product
@@ -89,6 +90,8 @@ def design_choice_sets(
         行数 = ``n_versions × n_sets × n_alts``。
 
         ``df.attrs["n_candidates"]`` — 完全交差の候補数 N。
+        ``df.attrs["design_signature"]`` — この設計を一意に表す署名
+        （内容から計算した短いハッシュ。:func:`design_signature` 参照）。
 
     Raises
     ------
@@ -107,6 +110,27 @@ def design_choice_sets(
     最も基本的な設計法を使う。設問数 × バージョン数が十分あれば、
     水準バランス・独立性ともに実用上問題のない設計が得られる。
     生成後は必ず :func:`check_design` で品質を確認すること。
+
+    .. warning::
+        **アンケート作成に使った design と、:func:`forms_to_data` に渡す
+        design は完全に同一にすること。**
+        属性名・水準・水準の順序・``seed``・``n_sets``・``n_alts``・
+        ``n_versions`` が1つでも違うと、**同じ seed でも別の設計**になる。
+        たとえば ``{"price": [6, 10]}`` と ``{"price": [10, 6]}`` は
+        seed が同じでも各選択セットの中身が変わる。
+        design がずれると回答と代替案の対応が静かに食い違い、
+        **エラーが出ないまま結果が誤る**（例：本来 正 の係数が 負 に出る）。
+
+        これを避けるため、**design は作成後すぐにファイルへ保存し、分析時は
+        作り直さず同じファイルを読み込んで** :func:`forms_to_data` に渡すこと::
+
+            design = pcc.design_choice_sets(attrs, n_sets=8, n_alts=3, seed=42)
+            design.to_csv("design.csv", index=False)   # 作成後すぐ保存
+            # …アンケート実施…
+            design = pd.read_csv("design.csv")          # 分析時は読み込むだけ
+            df = pcc.forms_to_data("responses.xlsx", design, ["A", "B", "C"])
+
+        2つの design が同一かは :func:`design_signature` の署名で確認できる。
 
     Examples
     --------
@@ -171,7 +195,75 @@ def design_choice_sets(
 
     out = pd.concat(frames, ignore_index=True)
     out.attrs["n_candidates"] = N
+    out.attrs["design_signature"] = design_signature(out)
     return out
+
+
+# ---------------------------------------------------------------------------
+# 公開API: design_signature 関数
+# ---------------------------------------------------------------------------
+
+def design_signature(design: pd.DataFrame) -> str:
+    """
+    選択セット設計（design）の内容から、一意な **署名**（短いハッシュ）を計算する。
+
+    署名は ``version``・``choice_set_id``・``alt_id`` と各属性の **値そのもの**
+    から決定的に計算する。したがって：
+
+    * 属性名・水準・**水準の順序**・``n_sets``・``n_alts`` が完全に同一なら
+      同じ署名になる（``seed`` を指定して再生成した場合も一致する）。
+    * 水準の順序が1つでも違う、属性や設問の中身が違う設計は、別の署名になる。
+    * ``seed=None`` で生成した設計は呼ぶたびに中身が変わるため、署名も変わる。
+
+    アンケート作成に使った design と、分析時に :func:`forms_to_data` へ渡す
+    design が **同一かどうかを確認** するために使う。両者の署名が一致すれば
+    同じ設計であり、回答と代替案の対応が正しく解決される。
+
+    Parameters
+    ----------
+    design : pd.DataFrame
+        :func:`design_choice_sets` の出力、または ``choice_set_id``・``alt_id``
+        ＋属性列を持つ設計表（CSV から読み込んだものでもよい）。
+
+    Returns
+    -------
+    str
+        12 桁の十六進文字列（内容から計算した署名）。
+
+    Examples
+    --------
+    >>> d1 = pcc.design_choice_sets({"price": [6, 10], "os": ["a", "b"]},
+    ...                             n_sets=4, n_alts=2, seed=1)
+    >>> d2 = pcc.design_choice_sets({"price": [10, 6], "os": ["a", "b"]},
+    ...                             n_sets=4, n_alts=2, seed=1)
+    >>> pcc.design_signature(d1) == pcc.design_signature(d2)
+    False
+    """
+    if not isinstance(design, pd.DataFrame):
+        raise TypeError(
+            "design は pandas.DataFrame を指定してください"
+            f"（受け取った型: {type(design).__name__}）。"
+        )
+    if "choice_set_id" not in design.columns or "alt_id" not in design.columns:
+        raise ValueError(
+            "design に choice_set_id・alt_id 列が必要です。\n"
+            "  design_choice_sets() の出力、または設計CSV を渡してください。"
+        )
+
+    id_cols = [c for c in ("version", "choice_set_id", "alt_id")
+               if c in design.columns]
+    # 属性列は順序の影響を受けないよう、列名で並べてから値を取り込む
+    attr_cols = sorted(c for c in design.columns if c not in id_cols)
+    cols = id_cols + attr_cols
+
+    # 行を ID 列で正準順に並べ、列順も固定して値を文字列化（決定的）
+    canon = design[cols].sort_values(id_cols).reset_index(drop=True)
+    lines = [
+        "|".join(f"{c}={canon.iloc[i][c]!r}" for c in cols)
+        for i in range(len(canon))
+    ]
+    payload = "\n".join(lines)
+    return hashlib.sha1(payload.encode("utf-8")).hexdigest()[:12]
 
 
 # ---------------------------------------------------------------------------

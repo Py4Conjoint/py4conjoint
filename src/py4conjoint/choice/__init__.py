@@ -51,6 +51,7 @@ from .design import (
     ChoiceDesignCheckResult,
     check_design,
     design_choice_sets,
+    design_signature,
     suggest_n_respondents,
 )
 
@@ -65,6 +66,7 @@ __all__ = [
     "forms_to_data",
     # 設計
     "design_choice_sets",
+    "design_signature",
     "check_design",
     "ChoiceDesignCheckResult",
     "suggest_n_respondents",

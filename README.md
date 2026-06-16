@@ -218,7 +218,18 @@ pcc.suggest_n_respondents(
     {"price": [100, 150, 200], "brand": ["A社", "B社", "C社"]},
     n_sets=8, n_alts=3,
 )
+
+# 作成した設計はすぐ保存し、分析時は作り直さず読み込んで使う（下の警告を参照）
+design.to_csv("design.csv", index=False)
 ```
+
+> ⚠️ **アンケート作成に使った design と、`forms_to_data()` に渡す design は
+> 完全に同一にすること。** 属性名・水準・**水準の順序**・`seed`・`n_sets`・
+> `n_alts` が1つでも違うと、同じ `seed` でも別の設計になり、回答と代替案の
+> 対応が **エラーなく食い違って結果が誤ります**（例：本来 正 の係数が 負 に出る）。
+> 事故を防ぐため、design は作成後すぐ `design.to_csv(...)` で保存し、分析時は
+> `pd.read_csv(...)` で**同じファイルを読み込んで**渡してください。2つの design が
+> 同一かは `pcc.design_signature(design)` の署名で確認できます。
 
 #### 2. アンケートデータを読み込む
 
@@ -305,6 +316,7 @@ result.plot_wtp(price_unit="円")  # WTPの棒グラフ
 | 関数 / メソッド | 説明 |
 |----------------|------|
 | `design_choice_sets()` | CBC 用の選択セット生成（完全交差からのランダム割り当て） |
+| `design_signature()` | 設計の署名（作成時と分析時の design が同一か確認する） |
 | `check_design()` | 選択セット設計の診断（バランス・独立性・オーバーラップ） |
 | `suggest_n_respondents()` | Johnson-Orme の経験則による必要回答者数の目安 |
 | `forms_to_data()` | Microsoft/Google Forms の回答ファイルを long 形式 DataFrame に変換 |

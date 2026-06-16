@@ -34,6 +34,9 @@ from ..rating._forms import (
     _read_microsoft_forms,
 )
 
+# 設計の署名（design とデータの来歴を出力に引き継ぐため）
+from .design import design_signature
+
 # ---------------------------------------------------------------------------
 # 公開API
 # ---------------------------------------------------------------------------
@@ -98,6 +101,15 @@ def forms_to_data(
         （``version``, ``choice_set_id``, ``alt_id`` + 属性列）。
         アンケートの各設問に提示した代替案の属性・水準が、
         この設計から復元される。
+
+        .. warning::
+            ここに渡す design は、**アンケート作成に使った design と完全に
+            同一**でなければならない。属性名・水準・水準の順序・``seed``・
+            ``n_sets``・``n_alts`` が1つでも違うと、同じ seed でも別の設計に
+            なり、回答と代替案の対応が **エラーなく食い違って結果が誤る**。
+            design は作成後すぐ CSV 等に保存し、分析時は作り直さず同じ
+            ファイルを読み込んで渡すこと（:func:`design_choice_sets` の
+            注意書きと :func:`design_signature` を参照）。
 
     choice_labels : list of str
         回答選択肢を識別するラベルのリスト（``alt_id`` の順）。
@@ -233,7 +245,34 @@ def forms_to_data(
     attr_names = [c for c in design.columns if c not in id_cols]
     choice_set_ids = sorted(design_v["choice_set_id"].unique())
     n_sets = len(choice_set_ids)
-    n_alts = int(design_v.groupby("choice_set_id")["alt_id"].size().iloc[0])
+
+    # 構造チェック：全選択セットの代替案数が揃っているか。
+    #   揃っていない design（壊れた設計表・version 指定ミスなど）を
+    #   先頭セットの数で盲信すると、後段の属性復元が静かにずれる。
+    alts_per_set = design_v.groupby("choice_set_id")["alt_id"].size()
+    if alts_per_set.nunique() != 1:
+        counts = alts_per_set.value_counts().to_dict()
+        raise ValueError(
+            "design の選択セットごとの代替案数が揃っていません"
+            f"（代替案数の内訳: {counts}）。\n"
+            "  すべての設問が同じ代替案数になる設計を渡してください。\n"
+            "  version 引数の指定ミス、または設計表の破損が考えられます。"
+        )
+    n_alts = int(alts_per_set.iloc[0])
+
+    # 各選択セットの alt_id が 1..n_alts を過不足なく網羅しているか。
+    expected_alts = set(range(1, n_alts + 1))
+    bad_sets = [
+        int(cid) for cid, grp in design_v.groupby("choice_set_id")
+        if set(grp["alt_id"]) != expected_alts
+    ]
+    if bad_sets:
+        raise ValueError(
+            "design の alt_id が 1.."
+            f"{n_alts} を網羅していない選択セットがあります"
+            f"（例: choice_set_id={bad_sets[:5]}）。\n"
+            "  各設問の alt_id は 1, 2, …, n_alts で揃えてください。"
+        )
 
     choice_labels = [str(lb) for lb in choice_labels]
     if len(choice_labels) != n_alts:
@@ -391,6 +430,11 @@ def forms_to_data(
         + attr_names
     )
     df_long = pd.DataFrame(rows, columns=col_order)
+
+    # 使った design の署名を出力に引き継ぐ（来歴の記録）。
+    # アンケート作成時の design の署名と突き合わせれば、同じ設計で
+    # 読み込んだかを後から確認できる。
+    df_long.attrs["design_signature"] = design_signature(design_v)
 
     # ------------------------------------------------------------------
     # 5. CSV保存（任意）
