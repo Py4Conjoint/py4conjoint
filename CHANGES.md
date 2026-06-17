@@ -4,11 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ---
 
-## [0.4.0] - Unreleased
+## [0.4.0] - 2026-06-17
 
 ### Added
 - `choice/` サブパッケージを追加（選択型コンジョイント分析・CBC）。条件付きロジット（conditional logit）を `scipy.optimize` による自前実装で推定する（教育目的のため透明性優先）。`fit()`・`encode()`・`ChoiceConjointResult`（`summary()` / `importance()` / `wtp()` / `market_share()` / `warnings()`）を提供し、メソッド名・和文の表示ラベルは `rating` 版と統一。
-- `scipy>=1.8` を明示的依存に追加（`choice/` の最尤推定に使用。従来も statsmodels 経由で間接的に必要だった）。
+- `scipy>=1.8` choice/の最尤推定でscipy.optimizeを直接使用するため追加 
 - `choice/plot.py` を追加。`plot_importance()`・`plot_partworth()`・`plot_wtp()` を rating 版と同一のタイトル・日本語ラベルで提供し、`ChoiceConjointResult` のメソッドとしても呼び出せる。`plot_partworth()` はダミーコーディングの基準水準（係数0）を「{水準名}（基準）」として明示的に表示する。
 - `choice/design.py` を追加。`design_choice_sets()`（完全交差からのランダム割り当てによるCBC用選択セット生成。セット内のプロファイル重複は禁止、`n_versions` 対応）、`check_design()`（水準バランス・属性間独立性・セット内オーバーラップ率を診断する `ChoiceDesignCheckResult` を返す。和文サマリー付き）、`suggest_n_respondents()`（Johnson-Orme の経験則 n ≥ 500c/(t×a) による必要回答者数の目安）。
 - `forms_to_data()` を追加（`choice/_forms.py`）。Microsoft Forms / Google Forms の回答ファイル（1設問=1選択セット、回答選択肢=代替案）を、`design_choice_sets()` の出力と `choice_labels` によるマッチングで条件付きロジット推定用の long 形式（`respondent_id`・`choice_set_id`・`alt`・`choice` + 属性列）に変換する。設問数の不一致・未マッチ回答値は日本語エラー、未回答は警告のうえ該当選択セットを除外。
