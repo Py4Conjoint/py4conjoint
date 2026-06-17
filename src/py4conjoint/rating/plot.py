@@ -180,37 +180,27 @@ def plot_partworth(
         # 各非基準水準
         for c, b in zip(cols, bs):
             level = c[len(attr) + 1:] if c.startswith(f"{attr}_") else c
-            rows.append({"attribute": attr, "level": level, "partworth": float(b)})
-        # 基準水準
+            rows.append({"attribute": attr, "level": level,
+                         "partworth": float(b), "is_ref": False})
+        # 基準水準（効果コーディングでは部分効用 = −Σb の実値）
         ref_value = -float(bs.sum())
         ref_label = _reference_level_label(result, attr)
-        rows.append(
-            {"attribute": attr, "level": ref_label, "partworth": ref_value}
-        )
+        rows.append({"attribute": attr, "level": ref_label,
+                     "partworth": ref_value, "is_ref": True})
 
     df_pw = pd.DataFrame(rows)
     # 表示順：属性ごとに固める。属性内では値の小さい順
     df_pw = df_pw.sort_values(["attribute", "partworth"]).reset_index(drop=True)
+    df_pw["label"] = [
+        f"{a} = {l}" for a, l in zip(df_pw["attribute"], df_pw["level"])
+    ]
 
-    if ax is None:
-        fig, ax = plt.subplots(figsize=(8, max(3, 0.5 * len(df_pw) + 1)))
-
-    # 属性ごとに色を変える
-    attrs = df_pw["attribute"].unique().tolist()
-    cmap = plt.get_cmap("tab10")
-    color_map = {a: cmap(i % 10) for i, a in enumerate(attrs)}
-    colors = [color_map[a] for a in df_pw["attribute"]]
-
-    labels = [f"{a} = {l}" for a, l in zip(df_pw["attribute"], df_pw["level"])]
-    ax.barh(labels, df_pw["partworth"], color=colors)
-    if show_zero_line:
-        ax.axvline(0, color="gray", linewidth=0.8)
-    ax.set_xlabel("部分効用（評点ポイント）")
-    ax.set_title(title)
-    ax.spines["top"].set_visible(False)
-    ax.spines["right"].set_visible(False)
-    plt.tight_layout()
-    return ax
+    return _draw_partworth(
+        ax, df_pw,
+        xlabel="部分効用（評点ポイント）",
+        title=title,
+        show_zero_line=show_zero_line,
+    )
 
 
 def plot_wtp(
@@ -355,14 +345,26 @@ def _draw_wtp_single(
             title += "（線形近似）"
     ax.set_title(title)
 
+    vals = wtp["限界支払意思額"]
+    max_abs = max(abs(vals).max(), 1e-9)
     if show_values:
-        max_abs = max(abs(wtp["限界支払意思額"]).max(), 1e-9)
-        for y, v in enumerate(wtp["限界支払意思額"]):
+        for y, v in enumerate(vals):
             offset = 0.02 * max_abs
+            # 数値ラベルは棒の「外側」に置く（正→右、負→左）
             x = v + offset if v >= 0 else v - offset
             ha = "left" if v >= 0 else "right"
             label = f"{v:.2f}{price_unit or ''}"
             ax.text(x, y, label, va="center", ha=ha, fontsize=10)
+
+    # ラベルが軸・枠と重ならないよう x 軸範囲に余白を確保する。
+    # 棒の伸びる側（正→右／負→左）に、ラベル幅ぶんの広めの余白をとる。
+    has_neg = float(vals.min()) < 0
+    has_pos = float(vals.max()) > 0
+    lo = min(float(vals.min()), 0.0)
+    hi = max(float(vals.max()), 0.0)
+    pad_left = 0.45 * max_abs if has_neg else 0.05 * max_abs
+    pad_right = 0.45 * max_abs if has_pos else 0.05 * max_abs
+    ax.set_xlim(lo - pad_left, hi + pad_right)
 
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
@@ -412,10 +414,13 @@ def _draw_wtp_grouped(
             figsize=(max(6, 1.4 * len(attrs) + 2), 4.5)
         )
 
-    all_vals = []
+    # 先に全ての値を求め、ラベルのはみ出しぶんの余白量を決める。
+    seg_vals = {seg: [_value(a, seg) for a in attrs] for seg in segments}
+    all_vals = [v for vals in seg_vals.values() for v in vals]
+    max_abs = max((abs(v) for v in all_vals), default=1e-9)
+
     for i, seg in enumerate(segments):
-        vals = [_value(a, seg) for a in attrs]
-        all_vals.extend(vals)
+        vals = seg_vals[seg]
         offset = (i - (n_seg - 1) / 2.0) * bar_width
         ax.bar(
             x + offset, vals, bar_width,
@@ -423,9 +428,12 @@ def _draw_wtp_grouped(
         )
         if show_values:
             for xi, v in zip(x + offset, vals):
+                # 数値ラベルは棒の「外側」（正→上／負→下）に少し離して置く
                 va = "bottom" if v >= 0 else "top"
+                voff = 0.03 * max_abs
                 ax.text(
-                    xi, v, f"{v:.1f}{price_unit or ''}",
+                    xi, v + (voff if v >= 0 else -voff),
+                    f"{v:.1f}{price_unit or ''}",
                     ha="center", va=va, fontsize=8, rotation=90,
                 )
 
@@ -438,9 +446,90 @@ def _draw_wtp_grouped(
 
     if all_vals:
         lo, hi = min(all_vals), max(all_vals)
-        pad = 0.18 * max(abs(lo), abs(hi), 1e-9)
+        # 縦に伸ばした回転ラベルが枠で切れないよう、上下に広めの余白をとる。
+        pad = 0.35 * max(abs(lo), abs(hi), 1e-9)
         ax.set_ylim(min(lo, 0) - pad, max(hi, 0) + pad)
 
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    plt.tight_layout()
+    return ax
+
+
+# ---------------------------------------------------------------------------
+# 部分効用の共通描画（rating / choice 共用）
+# ---------------------------------------------------------------------------
+
+# 基準水準マーカー（比較の起点）の色。棒（効果の大きさ）と区別する薄いグレー。
+_REF_MARKER_COLOR = "#9E9E9E"
+
+
+def _draw_partworth(
+    ax,
+    df_pw: pd.DataFrame,
+    *,
+    xlabel: str,
+    title: str,
+    show_zero_line: bool,
+):
+    """
+    rating / choice 共通の部分効用バー＋基準水準マーカーの描画。
+
+    基準水準は「棒ではないひし形マーカー（◇）」で **比較の起点** であることを示す。
+
+    * choice（ダミーコーディング）：基準水準の値は 0 なので、棒は描かれず
+      ◇ マーカーだけが 0 の位置に出る（歯抜けに見えない）。
+    * rating（効果コーディング）：基準水準は −Σb の実値を持つので通常の棒を描き、
+      その先端に ◇ マーカーを重ねて「ここが基準水準」と分かるようにする。
+
+    Parameters
+    ----------
+    df_pw : DataFrame
+        属性ごとにまとまった順序で、次の列を持つこと：
+        ``attribute``（属性名）, ``partworth``（部分効用の値）,
+        ``is_ref``（基準水準か）, ``label``（y 軸ラベル）。
+    """
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(8, max(3, 0.5 * len(df_pw) + 1)))
+
+    # 属性ごとに色を変え、どの水準がどの属性かを分かりやすくする
+    attrs = list(dict.fromkeys(df_pw["attribute"].tolist()))
+    cmap = plt.get_cmap("tab10")
+    color_map = {a: cmap(i % 10) for i, a in enumerate(attrs)}
+
+    labels = df_pw["label"].tolist()
+    values = [float(v) for v in df_pw["partworth"]]
+    is_ref = list(df_pw["is_ref"])
+
+    bars = ax.barh(labels, values, color=[color_map[a] for a in df_pw["attribute"]])
+    # 基準水準の棒は控えめにして「効果の大きさ」と「比較の起点」を視覚的に分ける
+    for bar, ref in zip(bars, is_ref):
+        if ref:
+            bar.set_alpha(0.45)
+
+    # 0 の位置を示す基準線（点線・細い灰色）
+    if show_zero_line:
+        ax.axvline(0, color="gray", linewidth=1.0, linestyle=":")
+
+    # 基準水準にひし形マーカー（比較の起点）。値の位置（choice=0 / rating=−Σb）に出る。
+    ref_pos = [i for i, r in enumerate(is_ref) if r]
+    if ref_pos:
+        ax.scatter(
+            [values[i] for i in ref_pos], ref_pos,
+            marker="D", s=55, color=_REF_MARKER_COLOR,
+            edgecolors="white", linewidths=0.8, zorder=3,
+            label="基準水準（比較の起点）",
+        )
+        ax.legend(loc="best", fontsize=9, framealpha=0.9)
+
+    # マーカー・ラベルが枠で切れないよう x 余白を確保
+    lo = min(min(values), 0.0)
+    hi = max(max(values), 0.0)
+    pad = 0.08 * max(hi - lo, 1e-9)
+    ax.set_xlim(lo - pad, hi + pad)
+
+    ax.set_xlabel(xlabel)
+    ax.set_title(title)
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
     plt.tight_layout()

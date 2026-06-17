@@ -68,6 +68,76 @@ def test_design_validation_errors():
         pcc.design_choice_sets(
             {"a": [1, 2], "b": [1, 2]}, n_sets=4, n_alts=5
         )
+    # auto_balance=True で n_candidates < 1
+    with pytest.raises(ValueError, match="n_candidates"):
+        pcc.design_choice_sets(ATTRS, n_sets=8, n_alts=3,
+                               auto_balance=True, n_candidates=0)
+
+
+# ---------------------------------------------------------------------------
+# design_choice_sets: auto_balance（バランスの良い設計を自動選択）
+# ---------------------------------------------------------------------------
+
+# 警告が出やすい小さめのスマホ設計（auto_balance の効果が見える）
+SMARTPHONE = {"price": [6, 10], "os": ["apple", "android"],
+              "camera": ["標準", "高性能"]}
+
+
+def _cv_sum_and_warnings(design):
+    chk = pcc.check_design(design)
+    return float(chk.balance["CV"].sum()), len(chk.diagnostics)
+
+
+def test_auto_balance_default_is_false_and_unchanged():
+    """auto_balance を指定しなければ従来と完全に同一の設計（後方互換）。"""
+    d_plain = pcc.design_choice_sets(SMARTPHONE, n_sets=6, n_alts=3, seed=0)
+    d_default = pcc.design_choice_sets(SMARTPHONE, n_sets=6, n_alts=3, seed=0,
+                                       auto_balance=False)
+    pd.testing.assert_frame_equal(d_plain, d_default)
+    # 従来の attrs はそのまま（auto_balance の来歴は付かない）
+    assert "auto_balance" not in d_plain.attrs
+    assert d_plain.attrs["n_candidates"] == 8  # 2×2×2
+
+
+def test_auto_balance_not_worse_than_single_seed():
+    """auto_balance=True は、典型的な単一 seed より悪くならない。"""
+    single = pcc.design_choice_sets(SMARTPHONE, n_sets=6, n_alts=3, seed=0)
+    auto = pcc.design_choice_sets(SMARTPHONE, n_sets=6, n_alts=3, seed=0,
+                                  auto_balance=True, n_candidates=200)
+    cv_s, w_s = _cv_sum_and_warnings(single)
+    cv_a, w_a = _cv_sum_and_warnings(auto)
+    assert w_a <= w_s        # 警告数は同等以下
+    assert cv_a <= cv_s + 1e-9  # CV 合計も同等以下
+
+
+def test_auto_balance_reproducible_with_seed():
+    """同じ seed・引数なら auto_balance でも毎回同じ設計（同じ署名）。"""
+    d1 = pcc.design_choice_sets(SMARTPHONE, n_sets=6, n_alts=3, seed=7,
+                                auto_balance=True, n_candidates=50)
+    d2 = pcc.design_choice_sets(SMARTPHONE, n_sets=6, n_alts=3, seed=7,
+                                auto_balance=True, n_candidates=50)
+    pd.testing.assert_frame_equal(d1, d2)
+    assert d1.attrs["design_signature"] == d2.attrs["design_signature"]
+
+
+def test_auto_balance_records_provenance():
+    """選定の来歴が attrs に入る（候補数・警告数・CV 合計）。"""
+    d = pcc.design_choice_sets(SMARTPHONE, n_sets=6, n_alts=3, seed=1,
+                               auto_balance=True, n_candidates=100)
+    prov = d.attrs["auto_balance"]
+    assert prov["n_candidates"] == 100
+    cv_sum, n_warn = _cv_sum_and_warnings(d)
+    # 来歴の値が実際の設計の診断と一致する（表示と実態の一致）
+    assert prov["n_warnings"] == n_warn
+    assert abs(prov["cv_sum"] - cv_sum) < 1e-6
+
+
+def test_auto_balance_small_n_candidates_ok():
+    """小さい n_candidates でもエラーなく動く。"""
+    d = pcc.design_choice_sets(SMARTPHONE, n_sets=6, n_alts=3, seed=2,
+                               auto_balance=True, n_candidates=1)
+    assert len(d) == 6 * 3
+    assert d.attrs["auto_balance"]["n_candidates"] == 1
 
 
 # ---------------------------------------------------------------------------

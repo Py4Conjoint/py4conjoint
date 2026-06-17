@@ -45,6 +45,8 @@ def design_choice_sets(
     *,
     n_versions: int = 1,
     seed: Optional[int] = None,
+    auto_balance: bool = False,
+    n_candidates: int = 500,
 ) -> pd.DataFrame:
     """
     CBC（選択型コンジョイント分析）用の **選択セット** を生成する。
@@ -79,6 +81,24 @@ def design_choice_sets(
     seed : int, optional
         乱数シード（再現性のため）。
 
+    auto_balance : bool, default False
+        ``True`` にすると、**バランスの良い設計を自動で選びます**。
+        seed を手で 1, 2, 3… と変えて良い設計を探さなくてよくなります。
+        内部で ``n_candidates`` 個の設計を作って :func:`check_design` で診断し、
+        最もバランスの良いものを1つ返します（既定の ``False`` では従来どおり
+        単一のランダム設計を返します）。
+
+        .. note::
+            これは「たくさん試した中で最もバランスの良いもの」を選ぶ方法であり、
+            数学的な最適計画（D 最適計画）ではありません。
+            選ばれた設計の質は :func:`check_design` で確認できます。
+
+    n_candidates : int, default 500
+        ``auto_balance=True`` のときに内部で生成・診断する設計の数。
+        多いほど良い設計が見つかりやすくなりますが、属性・水準が多い大規模な
+        設計では時間がかかります。時間がかかりすぎる場合は値を小さくしてください。
+        ``auto_balance=False`` のときは使われません。
+
     Returns
     -------
     pd.DataFrame
@@ -92,6 +112,12 @@ def design_choice_sets(
         ``df.attrs["n_candidates"]`` — 完全交差の候補数 N。
         ``df.attrs["design_signature"]`` — この設計を一意に表す署名
         （内容から計算した短いハッシュ。:func:`design_signature` 参照）。
+
+        ``auto_balance=True`` のときは、さらに選定の来歴が入る：
+
+        ``df.attrs["auto_balance"]`` — ``{"n_candidates": 評価した設計の数,
+        "n_warnings": 選ばれた設計の警告数, "cv_sum": 全属性の CV の合計}``
+        の辞書。どの程度の候補から、どんな質の設計が選ばれたかを後から確認できる。
 
     Raises
     ------
@@ -110,6 +136,10 @@ def design_choice_sets(
     最も基本的な設計法を使う。設問数 × バージョン数が十分あれば、
     水準バランス・独立性ともに実用上問題のない設計が得られる。
     生成後は必ず :func:`check_design` で品質を確認すること。
+
+    良い設計を得るために seed を手で変えて探すのが面倒なときは、
+    ``auto_balance=True`` を使うと、複数候補の中から最もバランスの良い設計を
+    自動で選んでくれる（seed 探しが不要になる）。
 
     .. warning::
         **アンケート作成に使った design と、:func:`forms_to_data` に渡す
@@ -164,6 +194,10 @@ def design_choice_sets(
         raise ValueError(
             f"n_versions は 1 以上の整数を指定してください（指定値: {n_versions}）。"
         )
+    if auto_balance and n_candidates < 1:
+        raise ValueError(
+            f"n_candidates は 1 以上の整数を指定してください（指定値: {n_candidates}）。"
+        )
 
     attrs = list(attributes.keys())
     levels_list = [list(attributes[a]) for a in attrs]
@@ -182,20 +216,35 @@ def design_choice_sets(
         )
 
     # ---------- ランダム割り当て（セット内重複なし） ----------
-    rng = np.random.default_rng(seed)
-    frames = []
-    for ver in range(1, n_versions + 1):
-        for s in range(1, n_sets + 1):
-            idx = rng.choice(N, size=n_alts, replace=False)
-            block = full.iloc[idx].copy()
-            block.insert(0, "version", ver)
-            block.insert(1, "choice_set_id", s)
-            block.insert(2, "alt_id", range(1, n_alts + 1))
-            frames.append(block)
+    if not auto_balance:
+        # 従来どおり：単一のランダム設計を生成する（後方互換）。
+        rng = np.random.default_rng(seed)
+        out = _assign_random_design(full, N, n_versions, n_sets, n_alts, rng)
+        out.attrs["n_candidates"] = N
+        out.attrs["design_signature"] = design_signature(out)
+        return out
 
-    out = pd.concat(frames, ignore_index=True)
+    # auto_balance：n_candidates 個の候補を作り、最もバランスの良いものを選ぶ。
+    # 候補生成は与えられた seed から決定的に派生させる（同じ seed → 同じ結果）。
+    child_seqs = np.random.SeedSequence(seed).spawn(n_candidates)
+    best = None  # (cand, n_warnings, cv_sum)
+    for cs in child_seqs:
+        rng_i = np.random.default_rng(cs)
+        cand = _assign_random_design(full, N, n_versions, n_sets, n_alts, rng_i)
+        chk = check_design(cand, attributes=attrs)
+        n_warn = len(chk.diagnostics)
+        cv_sum = float(chk.balance["CV"].sum())
+        if _is_better_design(best, n_warn, cv_sum):
+            best = (cand, n_warn, cv_sum)
+
+    out, best_warn, best_cv = best
     out.attrs["n_candidates"] = N
     out.attrs["design_signature"] = design_signature(out)
+    out.attrs["auto_balance"] = {
+        "n_candidates": int(n_candidates),   # 評価した候補設計の数
+        "n_warnings": int(best_warn),        # 選ばれた設計の警告数
+        "cv_sum": round(float(best_cv), 6),  # 全属性の CV の合計
+    }
     return out
 
 
@@ -543,6 +592,60 @@ def suggest_n_respondents(
         "  （サブグループ別に分析する場合はグループごとにこの人数が必要です）"
     )
     return result
+
+
+# ---------------------------------------------------------------------------
+# 内部ヘルパー（auto_balance）
+# ---------------------------------------------------------------------------
+
+def _assign_random_design(
+    full: pd.DataFrame,
+    N: int,
+    n_versions: int,
+    n_sets: int,
+    n_alts: int,
+    rng: "np.random.Generator",
+) -> pd.DataFrame:
+    """完全交差 ``full`` から1つのランダム設計（セット内重複なし）を生成する。
+
+    ``design_choice_sets`` の従来の生成ロジックをそのまま切り出したもの。
+    auto_balance の候補生成でも同じロジックを使う。
+    """
+    frames = []
+    for ver in range(1, n_versions + 1):
+        for s in range(1, n_sets + 1):
+            idx = rng.choice(N, size=n_alts, replace=False)
+            block = full.iloc[idx].copy()
+            block.insert(0, "version", ver)
+            block.insert(1, "choice_set_id", s)
+            block.insert(2, "alt_id", range(1, n_alts + 1))
+            frames.append(block)
+    return pd.concat(frames, ignore_index=True)
+
+
+def _is_better_design(
+    best: Optional[tuple],
+    n_warn: int,
+    cv_sum: float,
+) -> bool:
+    """方式D の優先順位で、新候補が現在の最良より良いかを判定する。
+
+    優先順位（小さいほど良い）::
+
+        (警告ゼロなら0・そうでなければ1, 警告数, CV合計)
+
+    * 警告ゼロの候補は、警告のある候補より常に優先される。
+    * 警告ゼロが複数あれば CV 合計が小さいものを選ぶ。
+    * 警告ゼロが無ければ、警告数が少ない→CV合計が小さい順に選ぶ。
+
+    厳密に「より良い」ときだけ True を返すので、同点では先に評価した候補が
+    残る（候補生成順は seed から決定的なので、選択結果も決定的になる）。
+    """
+    key = (0 if n_warn == 0 else 1, n_warn, cv_sum)
+    if best is None:
+        return True
+    best_key = (0 if best[1] == 0 else 1, best[1], best[2])
+    return key < best_key
 
 
 # ---------------------------------------------------------------------------

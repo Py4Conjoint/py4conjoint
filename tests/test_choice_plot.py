@@ -76,6 +76,25 @@ def test_plot_partworth_smoke(result):
     assert len(ax.patches) == 4
 
 
+def test_plot_partworth_reference_marker(result):
+    """基準水準は 0 位置のひし形マーカーで示され、歯抜けにならない。"""
+    ax = result.plot_partworth()
+    # ひし形マーカー（scatter）が描かれている（基準水準の比較の起点）
+    assert len(ax.collections) >= 1
+    # マーカーの説明凡例（「基準水準」）が付く
+    legend = ax.get_legend()
+    assert legend is not None
+    assert any("基準水準" in t.get_text() for t in legend.get_texts())
+    # 0 を示す点線の基準線がある
+    assert any(
+        line.get_linestyle() in (":", "dotted") for line in ax.lines
+    )
+    # 基準水準（brand_A）のマーカーは x=0 の位置にある（ダミーコーディング）
+    offsets = ax.collections[0].get_offsets()
+    assert offsets.shape[0] == 1            # 基準は brand の1つだけ
+    assert abs(float(offsets[0][0])) < 1e-9  # x 座標 = 0
+
+
 def test_plot_wtp_smoke(result):
     ax = result.plot_wtp(price_unit="ドル")
     assert ax is not None

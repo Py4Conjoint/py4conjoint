@@ -24,9 +24,13 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 import matplotlib.pyplot as plt
 import pandas as pd
 
-# 日本語フォント設定と WTP 描画ロジックは rating 版の仕組みをそのまま使う
+# 日本語フォント設定・部分効用描画・WTP 描画ロジックは rating 版の仕組みを共有する
 # （rating / choice で挙動を完全に揃えるため、共通実装を共有する）
-from ..rating.plot import _ensure_japanese_font, _plot_wtp_common
+from ..rating.plot import (
+    _draw_partworth,
+    _ensure_japanese_font,
+    _plot_wtp_common,
+)
 
 if TYPE_CHECKING:
     from .analysis import ChoiceConjointResult
@@ -145,47 +149,38 @@ def plot_partworth(
                 "attribute": attr,
                 "level": level,
                 "partworth": float(result.params[c]),
+                "is_ref": False,
             })
         # 基準水準（ダミーコーディングでは効用 0）
         rows.append({
             "attribute": attr,
             "level": _reference_level_label(result, attr),
             "partworth": 0.0,
+            "is_ref": True,
         })
-    # 数値（連続）変数は係数をそのまま表示
+    # 数値（連続）変数は係数をそのまま表示（基準水準は無い）
     for c in numeric_cols:
         rows.append({
             "attribute": c,
             "level": "（1単位あたり）",
             "partworth": float(result.params[c]),
+            "is_ref": False,
         })
 
     df_pw = pd.DataFrame(rows)
     # 表示順：属性ごとに固める。属性内では値の小さい順
     df_pw = df_pw.sort_values(["attribute", "partworth"]).reset_index(drop=True)
-
-    if ax is None:
-        fig, ax = plt.subplots(figsize=(8, max(3, 0.5 * len(df_pw) + 1)))
-
-    # 属性ごとに色を変える
-    attrs = df_pw["attribute"].unique().tolist()
-    cmap = plt.get_cmap("tab10")
-    color_map = {a: cmap(i % 10) for i, a in enumerate(attrs)}
-    colors = [color_map[a] for a in df_pw["attribute"]]
-
-    labels = [
+    df_pw["label"] = [
         f"{a} = {l}" if not l.startswith("（") else f"{a}{l}"
         for a, l in zip(df_pw["attribute"], df_pw["level"])
     ]
-    ax.barh(labels, df_pw["partworth"], color=colors)
-    if show_zero_line:
-        ax.axvline(0, color="gray", linewidth=0.8)
-    ax.set_xlabel("部分効用（基準水準との差）")
-    ax.set_title(title)
-    ax.spines["top"].set_visible(False)
-    ax.spines["right"].set_visible(False)
-    plt.tight_layout()
-    return ax
+
+    return _draw_partworth(
+        ax, df_pw,
+        xlabel="部分効用（基準水準との差）",
+        title=title,
+        show_zero_line=show_zero_line,
+    )
 
 
 def plot_wtp(
