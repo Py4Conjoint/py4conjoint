@@ -3,7 +3,10 @@
 - 旧API名（pc.fit など）へのアクセスが日本語の AttributeError になること
 - __version__ や rating サブパッケージなど正当な属性は通ること
 """
+import re
 import sys
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _dist_version
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -47,8 +50,27 @@ def test_unknown_attribute_raises_plain_attribute_error():
 
 
 def test_version_is_accessible():
-    """__version__ は正当な属性としてアクセスできる"""
-    assert isinstance(py4conjoint.__version__, str)
+    """__version__ は正当な属性としてアクセスでき、妥当なバージョン文字列である。
+
+    特定のバージョン番号をハードコードせず（リリースのたびにテストが壊れない）、
+    (1) 文字列であること、(2) セマンティックバージョニング形式であること、
+    (3) 配布メタデータ（pyproject.toml 由来）と一致すること、を検証する。
+    (3) は __init__.py の __version__ と pyproject.toml のバージョンが
+    食い違ったまま公開される事故を防ぐ。
+    """
+    v = py4conjoint.__version__
+    assert isinstance(v, str)
+    # 例: "0.4.0" / "0.4.0a1" / "1.2.3rc2" など（先頭が X.Y.Z）
+    assert re.match(r"^\d+\.\d+\.\d+", v), f"バージョン形式が不正です: {v!r}"
+    # 配布メタデータと一致すること（パッケージが導入済みのときのみ検証）
+    try:
+        dist_v = _dist_version("py4conjoint")
+    except PackageNotFoundError:
+        pytest.skip("py4conjoint が未インストールのためメタデータ照合をスキップ")
+    assert v == dist_v, (
+        f"__init__.py の __version__ ({v!r}) と配布メタデータ "
+        f"({dist_v!r}) が一致しません"
+    )
 
 
 def test_rating_subpackage_is_accessible():
