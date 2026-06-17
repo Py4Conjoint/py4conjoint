@@ -256,6 +256,12 @@ def fit(
     k = len(encoded_columns)
     chosen_mask = y == 1
 
+    # 目的関数は「選択セット1つあたりの平均」負の対数尤度にする（合計ではなく
+    # 平均）。こうすると目的関数も勾配もサンプル数 n_sets に依存しない O(1) の
+    # 大きさになり、(1) 収束判定 gtol=1e-5 が標本サイズによらず一定の意味を持ち、
+    # (2) 大標本で目的関数が巨大になって BFGS の直線探索が浮動小数点の精度落ちで
+    # 早期終了する（success=False になる）のを防げる。平均化しても最小値の位置
+    # （＝推定値 beta）は変わらないため、係数・標準誤差・尤度比は不変。
     def _neg_loglik_and_grad(beta: np.ndarray) -> Tuple[float, np.ndarray]:
         v = X @ beta                                   # 各行（代替案）の効用
         # 数値安定化：選択セットごとに最大効用を引く（softmax の定石）
@@ -267,7 +273,8 @@ def fit(
         p = ev / np.repeat(denom, counts)              # 各代替案の選択確率
         # 解析的勾配: Σ (x_chosen − Σ_j p_j x_j)
         grad = X[chosen_mask].sum(axis=0) - p @ X
-        return -ll, -grad
+        # 選択セット数で割って「平均」にする（最小化の解は不変）
+        return -ll / n_sets, -grad / n_sets
 
     opt = minimize(
         _neg_loglik_and_grad,
@@ -277,7 +284,8 @@ def fit(
         options={"gtol": 1e-5, "maxiter": 1000},
     )
     beta = opt.x
-    loglik = -float(opt.fun)
+    # opt.fun は平均負の対数尤度なので、合計の対数尤度に戻す
+    loglik = -float(opt.fun) * n_sets
     null_loglik = -float(np.log(counts).sum())  # β=0（全代替案が等確率）の対数尤度
 
     # ---------- 標準誤差 ----------
