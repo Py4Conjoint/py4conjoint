@@ -952,6 +952,25 @@ def test_design_profiles_errors():
     print("OK test_design_profiles_errors")
 
 
+def test_design_duplicate_levels_rejected():
+    """水準リストに重複があると design_profiles / suggest_n_profiles が
+    ValueError を出す（重複は候補数 N・パラメータ数 p を架空に膨らませる）"""
+    dup_levels = {"price": [6, 10, 6], "os": ["android", "apple"]}
+    try:
+        pc.design_profiles(dup_levels, n_profiles=4, seed=0)
+        assert False, "ValueError が出るはず"
+    except ValueError as e:
+        assert "重複" in str(e) and "price" in str(e)
+
+    try:
+        pc.suggest_n_profiles(dup_levels)
+        assert False, "ValueError が出るはず"
+    except ValueError as e:
+        assert "重複" in str(e) and "price" in str(e)
+
+    print("OK test_design_duplicate_levels_rejected")
+
+
 def test_design_profiles_d_efficiency_better_than_random():
     """D 最適設計の det(X'X) がランダム選択より大きい（n_starts=10）"""
     import itertools

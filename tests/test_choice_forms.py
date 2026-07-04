@@ -173,6 +173,19 @@ def test_choice_labels_length_error(tmp_path, design):
         pcc.forms_to_data(str(f), design, ["A", "B"])
 
 
+def test_choice_labels_duplicate_error(tmp_path, design):
+    """choice_labels に重複があると、真因を示す ValueError が即座に出る。
+
+    重複を許すと回答とのマッチングが曖昧になり、後段で
+    「どれにもマッチしない回答値があります」という原因から遠いエラーに
+    なる（回答が重複ラベルと完全一致する場合は無言で誤割当になる）。
+    """
+    f = tmp_path / "responses.xlsx"
+    _make_microsoft_xlsx(f, [["製品A", "製品B", "製品C", "製品A"]])
+    with pytest.raises(ValueError, match="choice_labels に重複"):
+        pcc.forms_to_data(str(f), design, ["A", "A", "C"])
+
+
 def test_invalid_version_error(tmp_path, design):
     f = tmp_path / "responses.xlsx"
     _make_microsoft_xlsx(f, [["製品A", "製品B", "製品C", "製品A"]])

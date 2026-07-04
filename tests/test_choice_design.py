@@ -74,6 +74,20 @@ def test_design_validation_errors():
                                auto_balance=True, n_candidates=0)
 
 
+def test_design_duplicate_levels_rejected():
+    """水準リストに重複があると ValueError が出る。
+
+    重複した水準は完全交差に同一プロファイルを複数作り、
+    「同一選択セット内に同じプロファイルは入らない」という保証が
+    静かに破れるため（重複ありでは 3 案中 2 案が同一の設問が生じ得る）。
+    """
+    dup_attrs = {"price": [100, 150, 100], "brand": ["A社", "B社"]}
+    with pytest.raises(ValueError, match="重複"):
+        pcc.design_choice_sets(dup_attrs, n_sets=8, n_alts=3, seed=0)
+    with pytest.raises(ValueError, match="重複"):
+        pcc.suggest_n_respondents(dup_attrs, n_sets=8, n_alts=3)
+
+
 # ---------------------------------------------------------------------------
 # design_choice_sets: auto_balance（バランスの良い設計を自動選択）
 # ---------------------------------------------------------------------------

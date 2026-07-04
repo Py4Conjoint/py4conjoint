@@ -129,7 +129,7 @@ def design_choice_sets(
     ------
     ValueError
         ``attributes`` が空または辞書でない場合。
-        いずれかの属性の水準数が 2 未満の場合。
+        いずれかの属性の水準数が 2 未満、または水準リストに重複がある場合。
         ``n_sets`` / ``n_alts`` / ``n_versions`` が範囲外の場合。
         ``n_alts`` が完全交差の候補数 N を超える場合
         （セット内の重複を禁止しているため）。
@@ -186,6 +186,14 @@ def design_choice_sets(
         if len(levels) < 2:
             raise ValueError(
                 f"属性 '{attr}' の水準数は 2 以上にしてください（現在: {len(levels)}）。"
+            )
+        # 重複した水準は完全交差に同一プロファイルを複数作り、
+        # 「同一選択セット内に同じプロファイルは入らない」という本関数の
+        # 保証が破れるため、ここで弾く。
+        if len(set(levels)) != len(levels):
+            raise ValueError(
+                f"属性 '{attr}' の水準リストに重複があります: {list(levels)}\n"
+                "  水準は重複なく指定してください。"
             )
     if n_sets < 1:
         raise ValueError(
@@ -555,7 +563,7 @@ def suggest_n_respondents(
     ------
     ValueError
         ``attributes`` が空または辞書でない場合。
-        いずれかの属性の水準数が 2 未満の場合。
+        いずれかの属性の水準数が 2 未満、または水準リストに重複がある場合。
         ``n_sets`` または ``n_alts`` が範囲外の場合。
 
     Notes
@@ -584,6 +592,12 @@ def suggest_n_respondents(
         if len(lvs) < 2:
             raise ValueError(
                 f"属性 '{attr}' の水準数は 2 以上にしてください（現在: {len(lvs)}）。"
+            )
+        # 重複した水準は最大水準数 c の計算を狂わせるため弾く
+        if len(set(lvs)) != len(lvs):
+            raise ValueError(
+                f"属性 '{attr}' の水準リストに重複があります: {list(lvs)}\n"
+                "  水準は重複なく指定してください。"
             )
     if n_sets < 1:
         raise ValueError(

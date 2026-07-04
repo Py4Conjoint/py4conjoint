@@ -192,7 +192,8 @@ def forms_to_data(
         forms が "microsoft" または "google" 以外の場合。
         design に必要な列（version, choice_set_id, alt_id）がない場合。
         指定した version が design に存在しない場合。
-        choice_labels の長さが design の代替案数と一致しない場合。
+        choice_labels に重複がある場合、または choice_labels の長さが
+        design の代替案数と一致しない場合。
         回答ファイルの設問数が design の設問数（n_sets）と一致しない場合。
         choice_labels のどれにもマッチしない（または複数にマッチする）
         回答値がある場合。
@@ -293,6 +294,16 @@ def forms_to_data(
         )
 
     choice_labels = [str(lb) for lb in choice_labels]
+    # ラベルが重複していると回答とのマッチングが曖昧になり、後段では
+    # 「どれにもマッチしない」という真因から遠いエラーになるため、ここで弾く。
+    dup_labels = sorted({lb for lb in choice_labels if choice_labels.count(lb) > 1})
+    if dup_labels:
+        raise ValueError(
+            f"choice_labels に重複があります: {dup_labels}\n"
+            f"  choice_labels: {choice_labels}\n"
+            "  回答とのマッチングが曖昧になるため、各代替案には\n"
+            "  互いに異なるラベルを指定してください。"
+        )
     if len(choice_labels) != n_alts:
         raise ValueError(
             f"choice_labels の長さ ({len(choice_labels)}) が design の"

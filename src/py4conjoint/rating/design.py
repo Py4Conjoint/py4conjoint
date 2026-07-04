@@ -95,7 +95,7 @@ def design_profiles(
     ------
     ValueError
         ``attribute_levels`` が空または辞書でない場合。
-        いずれかの属性の水準数が 2 未満の場合。
+        いずれかの属性の水準数が 2 未満、または水準リストに重複がある場合。
         ``n_starts`` が 1 未満の場合。
         ``n_profiles`` が完全交差の候補数 N を超える場合。
         ``n_profiles`` がパラメータ数より少ない場合。
@@ -146,6 +146,13 @@ def design_profiles(
         if len(levels) < 2:
             raise ValueError(
                 f"属性 '{attr}' の水準数は 2 以上にしてください（現在: {len(levels)}）。"
+            )
+        # 重複した水準は候補数 N・パラメータ数 p を架空に膨らませ、
+        # D 相対効率などが誤った値になるため、ここで弾く。
+        if len(set(levels)) != len(levels):
+            raise ValueError(
+                f"属性 '{attr}' の水準リストに重複があります: {list(levels)}\n"
+                "  水準は重複なく指定してください。"
             )
 
     attrs = list(attribute_levels.keys())
@@ -296,7 +303,7 @@ def suggest_n_profiles(
     ------
     ValueError
         ``attribute_levels`` が空または辞書でない場合。
-        いずれかの属性の水準数が 2 未満の場合。
+        いずれかの属性の水準数が 2 未満、または水準リストに重複がある場合。
         ``n_respondents`` が指定されており 1 未満の場合。
         ``obs_per_predictor`` または ``max_burden`` が 1 未満の場合。
 
@@ -346,6 +353,12 @@ def suggest_n_profiles(
         if len(lvs) < 2:
             raise ValueError(
                 f"属性 '{attr}' の水準数は 2 以上にしてください（現在: {len(lvs)}）。"
+            )
+        # 重複した水準は符号化列数・候補数 N の計算を狂わせるため弾く
+        if len(set(lvs)) != len(lvs):
+            raise ValueError(
+                f"属性 '{attr}' の水準リストに重複があります: {list(lvs)}\n"
+                "  水準は重複なく指定してください。"
             )
     if n_respondents is not None and n_respondents < 1:
         raise ValueError(

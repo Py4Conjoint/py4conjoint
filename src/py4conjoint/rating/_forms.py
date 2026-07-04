@@ -121,6 +121,7 @@ def forms_to_data(
     ValueError
         forms が "microsoft" または "google" 以外の場合。
         属性の水準リストの長さが揃っていない場合。
+        respondent_cols で指定された列がファイルにない場合。
         評点列が推測されたプロファイル数分見つからない場合。
     """
 
@@ -198,6 +199,12 @@ def forms_to_data(
 
     respondent_rename: Dict[str, str] = respondent_cols or {}
     respondent_src_cols = list(respondent_rename.keys())
+    missing_resp = [c for c in respondent_src_cols if c not in raw.columns]
+    if missing_resp:
+        raise ValueError(
+            f"respondent_cols で指定された列がファイルにありません: {missing_resp}\n"
+            f"  ファイルの列: {list(raw.columns)}"
+        )
 
     non_rating_cols = set(system_cols) | set(respondent_src_cols)
     rating_candidate_cols = [c for c in raw.columns if c not in non_rating_cols]

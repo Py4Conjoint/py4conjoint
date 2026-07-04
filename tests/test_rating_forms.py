@@ -79,6 +79,20 @@ def test_no_warning_when_extra_numeric_column_in_respondent_cols(tmp_path):
     assert r1.loc["P1"] == 5 and r1.loc["P4"] == 4
 
 
+def test_missing_respondent_col_raises_friendly_error(tmp_path):
+    """respondent_cols の列名がファイルに無いと日本語の ValueError が出る。
+
+    従来は pandas の生の KeyError（英語）で原因が分かりにくかった。
+    choice 版 forms_to_data と同じチェック・同じメッセージ。
+    """
+    f = tmp_path / "responses.xlsx"
+    _write_xlsx(f, {
+        f"Q{i+1}. 製品案{i+1}の評価": [5, 6, 4] for i in range(4)
+    })
+    with pytest.raises(ValueError, match="respondent_cols で指定された列がファイルにありません"):
+        pcr.forms_to_data(str(f), PROFILES, respondent_cols={"存在しない列": "x"})
+
+
 # ---------------------------------------------------------------------------
 # 評点の数値化（文字列の評点・変換できない値）
 # ---------------------------------------------------------------------------
