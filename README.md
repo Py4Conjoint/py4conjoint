@@ -355,7 +355,7 @@ result.plot_wtp(price_unit="円")  # WTPの棒グラフ
 | scipy | ≥ 1.8 |
 | statsmodels | ≥ 0.13 |
 | matplotlib | ≥ 3.4 |
-| openpyxl | ≥ 3.0 |
+| openpyxl | ≥ 3.1.5 |
 
 ## ライセンス
 

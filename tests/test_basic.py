@@ -90,6 +90,26 @@ def test_encode_three_levels():
     print("OK test_encode_three_levels")
 
 
+def test_encode_three_levels_keeps_nan():
+    """3水準以上でも欠損は欠損のまま残る（0 に化けない）。
+
+    回帰テスト：以前は Series.map が NaN にも関数を適用したため、
+    欠損が全ダミー列 0（＝全水準平均の効用）として静かに回帰に混入していた。
+    2水準（map(dict)）・choice 版（pd.NA 保持）と同じ挙動に揃える。
+    """
+    df = pd.DataFrame({
+        "rating": [3, 5, 7, 4],
+        "color":  ["赤", "青", "緑", np.nan],
+    })
+    out = pc.encode(df, reference_levels={"color": "赤"})
+    nan_rows = out[out["color"].isna()]
+    assert nan_rows["color_0"].isna().all(), "欠損行の color_0 が NaN でない"
+    assert nan_rows["color_1"].isna().all(), "欠損行の color_1 が NaN でない"
+    # 欠損でない行の符号化は従来どおり
+    assert (out.loc[out["color"] == "赤", ["color_0", "color_1"]] == -1).all().all()
+    print("OK test_encode_three_levels_keeps_nan")
+
+
 def test_fit_and_summary():
     df = make_synthetic_data(seed=2, n_resp=30)
     df_coded = pc.encode(
@@ -721,6 +741,33 @@ def test_check_design_imbalanced():
     assert any("balance" in c for c in cats), \
         f"balance 警告が出ていない。警告: {cats}"
     print("OK test_check_design_imbalanced")
+
+
+def test_check_design_ignores_pandas_index_column(tmp_path):
+    """index=False を付け忘れた profiles CSV でも、行番号列を属性として診断しない。
+
+    回帰テスト：以前は Unnamed: 0 列（P1, P2, … のラベル）が「プロファイル数と
+    同数の水準を持つ属性」として扱われ、パラメータ数が架空に膨らんで
+    insufficient_profiles などの誤警告が大量に出ていた。
+    """
+    profiles = pd.DataFrame({
+        "price":  [6, 10, 6, 10],
+        "os":     ["android", "apple", "apple", "android"],
+        "camera": ["標準", "標準", "高性能", "高性能"],
+    }, index=["P1", "P2", "P3", "P4"])
+    csv = tmp_path / "profiles.csv"
+    profiles.to_csv(csv)                      # index=False を付け忘れたケース
+    loaded = pd.read_csv(csv)
+    assert "Unnamed: 0" in loaded.columns
+
+    result = pc.check_design(loaded)
+    # 行番号列は診断対象にならず、本来の属性だけが並ぶ
+    assert sorted(result.balance.index) == ["camera", "os", "price"]
+    # 完全直交デザインなので誤警告（insufficient_profiles 等）は出ない
+    cats = [d.category for d in result.diagnostics]
+    assert "insufficient_profiles" not in cats, f"誤警告が出た: {cats}"
+    assert not any("Unnamed" in c for c in cats), f"行番号列由来の警告: {cats}"
+    print("OK test_check_design_ignores_pandas_index_column")
 
 
 def test_encode_binary_suffix_map_as_list():

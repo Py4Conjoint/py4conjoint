@@ -196,6 +196,19 @@ def test_check_design_errors():
         pcc.check_design(design, attributes=["存在しない属性"])
 
 
+def test_check_design_ignores_pandas_index_column(tmp_path):
+    """index=False を付け忘れた design CSV でも、行番号列を属性として診断しない。"""
+    design = pcc.design_choice_sets(ATTRS, n_sets=8, n_alts=3, seed=42)
+    csv = tmp_path / "design.csv"
+    design.to_csv(csv)                        # index=False を付け忘れたケース
+    loaded = pd.read_csv(csv)
+    assert "Unnamed: 0" in loaded.columns
+    res = pcc.check_design(loaded)
+    # 行番号列は診断対象にならず、本来の属性だけが並ぶ
+    assert sorted(res.balance.index) == ["brand", "price"]
+    assert "Unnamed: 0" not in res.balance.index
+
+
 # ---------------------------------------------------------------------------
 # suggest_n_respondents
 # ---------------------------------------------------------------------------

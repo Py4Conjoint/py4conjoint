@@ -466,7 +466,11 @@ def _encode_multi(
                 return -1
             return 0
 
-        df[new_col] = df[attr].map(_map)
+        # na_action="ignore" で欠損を欠損のまま残す。
+        # （指定しないと NaN に _map が適用されて 0 になり、欠損が
+        #   「全水準の平均」を意味する値として回帰に静かに混入してしまう。
+        #   2水準の _encode_binary は map(dict) なので元々 NaN が保持される。）
+        df[new_col] = df[attr].map(_map, na_action="ignore")
         new_cols.append(new_col)
 
     return new_cols

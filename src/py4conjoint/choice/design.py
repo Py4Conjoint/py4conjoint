@@ -31,8 +31,14 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 import pandas as pd
 
-# 警告の構造化表現と表示ヘルパーは rating 版と共通のものを使う
-from ..rating.analysis import SEVERITY_ORDER, Diagnostic, _df_to_string_cjk
+# 警告の構造化表現・表示ヘルパー・pandas の行番号列（Unnamed: 0 など）の判定は
+# rating 版と共通のものを使う
+from ..rating.analysis import (
+    SEVERITY_ORDER,
+    Diagnostic,
+    _df_to_string_cjk,
+    _is_index_artifact_column,
+)
 
 # ---------------------------------------------------------------------------
 # 公開API: design_choice_sets 関数
@@ -263,6 +269,9 @@ def design_signature(design: pd.DataFrame) -> str:
       同じ署名になる（``seed`` を指定して再生成した場合も一致する）。
     * 水準の順序が1つでも違う、属性や設問の中身が違う設計は、別の署名になる。
     * ``seed=None`` で生成した設計は呼ぶたびに中身が変わるため、署名も変わる。
+    * pandas の行番号列（``Unnamed: 0`` など。``to_csv()`` を ``index=False``
+      なしで保存した CSV の痕跡）は設計の中身ではないため **無視** する。
+      index 付きで保存してしまった CSV でも、元の設計と署名が一致する。
 
     アンケート作成に使った design と、分析時に :func:`forms_to_data` へ渡す
     design が **同一かどうかを確認** するために使う。両者の署名が一致すれば
@@ -301,15 +310,30 @@ def design_signature(design: pd.DataFrame) -> str:
 
     id_cols = [c for c in ("version", "choice_set_id", "alt_id")
                if c in design.columns]
-    # 属性列は順序の影響を受けないよう、列名で並べてから値を取り込む
-    attr_cols = sorted(c for c in design.columns if c not in id_cols)
+    # 属性列は順序の影響を受けないよう、列名で並べてから値を取り込む。
+    # pandas の行番号列（Unnamed: 0 など。index=False を付けずに保存した
+    # CSV の痕跡）は設計の中身ではないため署名から除外する。これにより
+    # index 付きで保存してしまった CSV でも、元の設計と署名が一致する。
+    attr_cols = sorted(
+        c for c in design.columns
+        if c not in id_cols and not _is_index_artifact_column(c)
+    )
     cols = id_cols + attr_cols
 
     # 行を ID 列で正準順に並べ、列順も固定して値を文字列化（決定的）
     canon = design[cols].sort_values(id_cols).reset_index(drop=True)
+
+    def _plain(v):
+        # numpy スカラー（np.int64 など）を Python の値に変換してから repr する。
+        # numpy 2.x では repr(np.int64(6)) が 'np.int64(6)' になり（1.x は '6'）、
+        # 同じ設計でも numpy のバージョンによって署名が変わってしまうため。
+        # 署名は「時間・環境をまたいで design の同一性を確認する」ためのものなので、
+        # 環境に依存しない Python 値の repr（'6'）に正規化する。
+        return v.item() if hasattr(v, "item") else v
+
     lines = [
-        "|".join(f"{c}={canon.iloc[i][c]!r}" for c in cols)
-        for i in range(len(canon))
+        "|".join(f"{c}={_plain(v)!r}" for c, v in zip(cols, row))
+        for row in canon.itertuples(index=False, name=None)
     ]
     payload = "\n".join(lines)
     return hashlib.sha1(payload.encode("utf-8")).hexdigest()[:12]
@@ -443,7 +467,12 @@ def check_design(
             f"  受け取った型: {type(design).__name__}"
         )
     id_cols = ["version", "choice_set_id", "alt_id"]
-    attrs = attributes or [c for c in design.columns if c not in id_cols]
+    # 既定では ID 列と pandas の行番号列（Unnamed: 0 など）を除いた全列を
+    # 属性とみなす（attributes を明示指定した場合はそのまま尊重する）
+    attrs = attributes or [
+        c for c in design.columns
+        if c not in id_cols and not _is_index_artifact_column(c)
+    ]
     missing = [a for a in attrs if a not in design.columns]
     if missing:
         raise ValueError(

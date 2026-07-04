@@ -16,6 +16,7 @@ analysis.py
 """
 from __future__ import annotations
 
+import re
 import unicodedata
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set, Union
@@ -24,6 +25,26 @@ import numpy as np
 import pandas as pd
 import statsmodels.formula.api as smf
 from statsmodels.regression.linear_model import RegressionResults
+
+# ---------------------------------------------------------------------------
+# pandas の行番号列（index 付き CSV 保存の痕跡）の判定
+# （rating / choice で共通利用。choice 側は本モジュールから import する）
+# ---------------------------------------------------------------------------
+
+# pandas が index 付きで保存された CSV を読み込んだときに付ける列名
+# （to_csv() を index=False なしで保存 → 行番号が "Unnamed: 0" 列になる）
+_UNNAMED_COL_RE = re.compile(r"^Unnamed: \d+$")
+
+
+def _is_index_artifact_column(name: object) -> bool:
+    """pandas の行番号列（``Unnamed: 0`` など、index 付き CSV 保存の痕跡）か判定する。
+
+    この形式の列名は pandas が「名前のない列」に機械的に付けるもので、
+    設計の属性として現れることは実質ない。設計の中身（属性・水準）では
+    ないため、署名・診断・属性復元の対象から除外する。
+    """
+    return bool(_UNNAMED_COL_RE.match(str(name)))
+
 
 # ---------------------------------------------------------------------------
 # 警告（落とし穴）の構造化表現
@@ -184,6 +205,13 @@ def fit(
         回答者属性などの ``0/1`` 列は自動検出に含まれないため、
         説明変数に加えたい場合はこの引数で明示的に指定する。
         ``formula`` 指定時は無視される。
+
+        .. note::
+            回答者属性の列（``respondent_encode`` で作った ``gender_male``
+            などの 0/1 列）をここに含めると、その列は :meth:`ConjointResult.importance`
+            や :meth:`ConjointResult.wtp` の出力にも1つの「属性」として現れる。
+            回答者属性は製品の属性ではないため、その行の重要度・WTP は
+            製品属性と同じようには解釈できない点に注意すること。
 
     reference_levels : dict, optional
         :func:`encode` に渡したのと同じ辞書。
@@ -411,7 +439,13 @@ def check_design(
             f"profiles は pandas.DataFrame を指定してください。\n"
             f"  受け取った型: {type(profiles).__name__}"
         )
-    attrs = attributes or list(profiles.columns)
+    # 既定では pandas の行番号列（Unnamed: 0 など。index=False を付けずに
+    # 保存した CSV の痕跡）を除いた全列を属性とみなす。行番号列を属性として
+    # 診断すると、パラメータ数が架空に膨らんで insufficient_profiles などの
+    # 誤警告が出る。attributes を明示指定した場合はそのまま尊重する。
+    attrs = attributes or [
+        c for c in profiles.columns if not _is_index_artifact_column(c)
+    ]
     missing = [a for a in attrs if a not in profiles.columns]
     if missing:
         raise ValueError(
@@ -911,6 +945,8 @@ class ConjointResult:
         price_segment : str または (low, high), optional
             特定の価格区間の WTP だけを取り出したいときに指定する。
             ラベル文字列（例：``"6〜8"``）または ``(6, 8)`` のタプル。
+            区間別 WTP（価格3水準以上かつ ``method="segment"``）のときだけ
+            指定できる。それ以外で指定すると ``ValueError`` になる。
 
         Returns
         -------
@@ -1013,6 +1049,14 @@ class ConjointResult:
         # 隣接する価格水準ごとの区間（傾き）を作る
         segs = _price_segments_from_utilities(levels, util)
         multi_segment = (method == "segment") and (n_levels >= 3)
+        # 区間別 WTP でないのに price_segment が指定されたら、黙って無視せず
+        # エラーにする（「指定した区間の値が出ている」という誤解を防ぐ）。
+        if price_segment is not None and not multi_segment:
+            raise ValueError(
+                "price_segment は区間別 WTP（価格が3水準以上かつ "
+                "method='segment'）のときだけ指定できます。\n"
+                f"  現在: 価格 {n_levels} 水準、method='{method}'"
+            )
         if method == "linear" and n_levels >= 3:
             cat_key = "wtp_price_linear_approx"
             if cat_key not in already_cats:

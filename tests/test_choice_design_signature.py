@@ -83,6 +83,35 @@ def test_signature_requires_id_columns():
         pcc.design_signature(pd.DataFrame({"price": [1, 2]}))
 
 
+def test_signature_ignores_pandas_index_column(tmp_path):
+    """index=False を付け忘れて保存した CSV（Unnamed: 0 列入り）でも署名が一致する。
+
+    行番号列は設計の中身ではないため、署名の計算から除外される。
+    """
+    design = pcc.design_choice_sets(ATTRS, n_sets=4, n_alts=3, seed=42)
+    csv = tmp_path / "design_with_index.csv"
+    design.to_csv(csv)                       # index=False を付け忘れたケース
+    loaded = pd.read_csv(csv)
+    assert "Unnamed: 0" in loaded.columns    # 行番号列が混入している
+    assert pcc.design_signature(loaded) == pcc.design_signature(design)
+
+
+def test_signature_independent_of_numpy_scalar_types():
+    """値が同じなら、numpy スカラー列でも Python 値の列でも署名は一致する。
+
+    回帰テスト：以前はセル値の repr をそのままハッシュしていたため、
+    numpy 2.x（repr(np.int64(6)) == 'np.int64(6)'）と 1.x（'6'）で
+    同じ設計の署名が食い違った。署名は時間・環境をまたいだ design の
+    同一性確認に使うので、numpy のバージョンに依存してはならない。
+    """
+    design = pcc.design_choice_sets(ATTRS, n_sets=8, n_alts=3, seed=42)
+    # 数値列を Python の int（object dtype）に変換した「値が同じ」設計
+    as_python = design.copy()
+    for c in ("version", "choice_set_id", "alt_id", "price"):
+        as_python[c] = as_python[c].map(int).astype(object)
+    assert pcc.design_signature(as_python) == pcc.design_signature(design)
+
+
 # ---------------------------------------------------------------------------
 # forms_to_data: 署名を出力に引き継ぐ
 # ---------------------------------------------------------------------------
@@ -124,6 +153,30 @@ def test_forms_to_data_signature_matches_survey_design(tmp_path):
     analysis_design = pd.read_csv(csv)            # 分析時は読み込むだけ
     df = pcc.forms_to_data(str(f), analysis_design, ["A", "B", "C"])
     # 出力の署名 == アンケート作成に使った design の署名
+    assert df.attrs["design_signature"] == pcc.design_signature(survey_design)
+
+
+def test_forms_to_data_warns_and_drops_index_column(tmp_path):
+    """index=False を付け忘れた design CSV でも、警告のうえ正しく動く。
+
+    行番号列（Unnamed: 0）は属性でないため出力から除外され、
+    出力に引き継がれる署名も元の設計と一致する。
+    """
+    survey_design = pcc.design_choice_sets(ATTRS, n_sets=4, n_alts=3, seed=42)
+    csv = tmp_path / "design.csv"
+    survey_design.to_csv(csv)                     # index=False を付け忘れたケース
+
+    f = tmp_path / "responses.xlsx"
+    _make_responses_xlsx(f, n_sets=4)
+
+    analysis_design = pd.read_csv(csv)
+    with pytest.warns(UserWarning, match="index=False"):
+        df = pcc.forms_to_data(str(f), analysis_design, ["A", "B", "C"])
+    # 行番号列は属性として混入しない
+    assert "Unnamed: 0" not in df.columns
+    # 属性列は本来のものだけ
+    assert set(df.columns) >= {"price", "brand"}
+    # 署名は元の設計と一致する（行番号列は無視される）
     assert df.attrs["design_signature"] == pcc.design_signature(survey_design)
 
 

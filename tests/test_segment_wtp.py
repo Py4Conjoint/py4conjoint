@@ -307,6 +307,50 @@ def test_constructive_matching_rating():
 
 
 # ---------------------------------------------------------------------------
+# price_segment は区間別 WTP のときだけ指定できる（黙って無視しない）
+# ---------------------------------------------------------------------------
+
+def test_price_segment_rejected_for_2level_rating():
+    """rating：価格2水準（区間1つ）で price_segment を指定するとエラー。"""
+    rng = np.random.default_rng(11)
+    rows = []
+    for r in range(1, 16):
+        for price in [6, 10]:
+            for os in ["android", "apple"]:
+                u = 4.0 + (1.0 if price == 6 else -1.0)
+                u += 0.7 if os == "apple" else -0.7
+                u += rng.normal(0, 0.3)
+                rows.append({"respondent_id": r, "rating": int(np.clip(round(u), 1, 7)),
+                             "price": price, "os": os})
+    df = pd.DataFrame(rows)
+    dc = pc.encode(df, reference_levels={"price": 10, "os": "android"})
+    result = pc.fit(dc, price_col="price")
+    with pytest.raises(ValueError, match="price_segment"):
+        result.wtp(price_segment="6〜10")
+
+
+def test_price_segment_rejected_with_linear_rating():
+    """rating：method='linear'（区間別でない）で price_segment を指定するとエラー。"""
+    df = _make_rating_3level(seed=12, n_resp=15)
+    dc = pc.encode(df, reference_levels={"price": 10, "os": "android"},
+                   suffix_map={"price": ["low", "mid"]})
+    result = pc.fit(dc, price_col="price")
+    with pytest.raises(ValueError, match="price_segment"):
+        result.wtp(method="linear", price_segment="6〜8")
+
+
+def test_price_segment_rejected_for_single_segment_choice():
+    """choice：数値（線形）価格＝区間1つで price_segment を指定するとエラー。"""
+    df = _simulate_cbc({6: 0.0, 10: -1.0}, {"A": 0.0, "B": 0.4},
+                       n_sets=2000, seed=13)
+    dc = pcc.encode(df, reference_levels={"brand": "A"})
+    result = pcc.fit(dc, choice="choice", choice_set_id_col="choice_set_id",
+                     encoded_columns=["price", "brand_B"], price_col="price")
+    with pytest.raises(ValueError, match="price_segment"):
+        result.wtp(price_segment=(6, 10))
+
+
+# ---------------------------------------------------------------------------
 # encode() の数値列保持
 # ---------------------------------------------------------------------------
 

@@ -34,8 +34,9 @@ from ..rating._forms import (
     _read_microsoft_forms,
 )
 
-# 設計の署名（design とデータの来歴を出力に引き継ぐため）
-from .design import design_signature
+# 設計の署名（design とデータの来歴を出力に引き継ぐため）と
+# pandas の行番号列（Unnamed: 0 など）の判定
+from .design import _is_index_artifact_column, design_signature
 
 # ---------------------------------------------------------------------------
 # 公開API
@@ -243,6 +244,23 @@ def forms_to_data(
 
     id_cols = ["version", "choice_set_id", "alt_id"]
     attr_names = [c for c in design.columns if c not in id_cols]
+
+    # pandas の行番号列（Unnamed: 0 など）は属性ではないため除外して警告する。
+    # design.to_csv() を index=False なしで保存した CSV を読み込むと、
+    # 行番号が "Unnamed: 0" という列になって混入するため。
+    artifact_cols = [c for c in attr_names if _is_index_artifact_column(c)]
+    if artifact_cols:
+        warnings.warn(
+            f"design に pandas の行番号列とみられる列があります: {artifact_cols}\n"
+            "  design.to_csv() を index=False なしで保存した CSV を読み込むと、\n"
+            "  行番号がこのような列になって混入します。属性ではないため除外して\n"
+            "  処理を続けます（design_signature() もこの列を無視します）。\n"
+            "  保存時は design.to_csv('design.csv', index=False) としてください。",
+            UserWarning,
+            stacklevel=2,
+        )
+        attr_names = [c for c in attr_names if c not in artifact_cols]
+
     choice_set_ids = sorted(design_v["choice_set_id"].unique())
     n_sets = len(choice_set_ids)
 

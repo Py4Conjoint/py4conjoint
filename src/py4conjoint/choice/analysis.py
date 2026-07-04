@@ -859,6 +859,8 @@ class ChoiceConjointResult:
         price_segment : str または (low, high), optional
             特定の価格区間の WTP だけを取り出したいときに指定する。
             ラベル文字列（例：``"6〜8"``）または ``(6, 8)`` のタプル。
+            区間別 WTP（価格の区間が2つ以上かつ ``method="segment"``）の
+            ときだけ指定できる。それ以外で指定すると ``ValueError`` になる。
 
         Returns
         -------
@@ -965,6 +967,16 @@ class ChoiceConjointResult:
 
         # ---- 区間別か単一値かを決める ----
         multi_segment = (method == "segment") and (len(segs) >= 2)
+        # 区間別 WTP でないのに price_segment が指定されたら、黙って無視せず
+        # エラーにする（「指定した区間の値が出ている」という誤解を防ぐ）。
+        if price_segment is not None and not multi_segment:
+            raise ValueError(
+                "price_segment は区間別 WTP（価格の区間が2つ以上かつ "
+                "method='segment'）のときだけ指定できます。\n"
+                f"  現在: 価格の区間 {len(segs)} 個、method='{method}'\n"
+                "  （価格を数値（線形）変数として推定した場合や価格2水準の場合、\n"
+                "    区間は1つだけになります。）"
+            )
         if method == "linear" and len(segs) >= 2:
             # 線形近似：全水準を1本の傾きにまとめ直す
             slope_lin = float(np.polyfit(

@@ -17,6 +17,9 @@ from typing import Dict, List, Literal, Optional, Sequence
 
 import pandas as pd
 
+# pandas の行番号列（Unnamed: 0 など）の判定（rating / choice 共通）
+from .analysis import _is_index_artifact_column
+
 
 # ---------------------------------------------------------------------------
 # 公開API
@@ -124,6 +127,27 @@ def forms_to_data(
     # ------------------------------------------------------------------
     # 0. 入力チェック
     # ------------------------------------------------------------------
+    # profiles が DataFrame の場合、pandas の行番号列（Unnamed: 0 など）が
+    # 混入していれば警告のうえ除外する。profiles.to_csv() を index=False なしで
+    # 保存した CSV を読み込むと、index（プロファイルID）がこのような列に
+    # なって混入し、属性として出力に紛れ込んでしまうため。
+    if isinstance(profiles, pd.DataFrame):
+        artifact_cols = [
+            c for c in profiles.columns if _is_index_artifact_column(c)
+        ]
+        if artifact_cols:
+            warnings.warn(
+                f"profiles に pandas の行番号列とみられる列があります: {artifact_cols}\n"
+                "  profiles.to_csv() を index=False なしで保存した CSV を読み込むと、\n"
+                "  index（行番号やプロファイルID）がこのような列になって混入します。\n"
+                "  属性ではないため除外して処理を続けます。\n"
+                "  保存時は profiles.to_csv('profiles.csv', index=False) とするか、\n"
+                "  読み込み時に pd.read_csv(..., index_col=0) で index に戻してください。",
+                UserWarning,
+                stacklevel=2,
+            )
+            profiles = profiles.drop(columns=artifact_cols)
+
     if n_profiles is None:
         n_profiles = _infer_n_profiles(profiles)
 
@@ -212,7 +236,33 @@ def forms_to_data(
         var_name=profile_id_colname,
         value_name=rating_colname,
     )
-    df_long = df_long.sort_values([respondent_id_colname, profile_id_colname])
+
+    # 評点を数値化する。Forms の出力では評点が文字列（"5" など）で入ることが
+    # あり、そのまま fit() に渡すと statsmodels の分かりにくいエラーになる。
+    # 数値化できない値（空欄・記号など）は NaN になり、fit() の欠損処理に乗る。
+    n_nonnull_before = df_long[rating_colname].notna().sum()
+    df_long[rating_colname] = pd.to_numeric(
+        df_long[rating_colname], errors="coerce"
+    )
+    n_coerced = n_nonnull_before - df_long[rating_colname].notna().sum()
+    if n_coerced > 0:
+        warnings.warn(
+            f"評点列に数値へ変換できない値が {n_coerced} 件あり、"
+            "欠損（NaN）として扱います。\n"
+            "  該当行は fit() の際に分析から除外されます。",
+            UserWarning,
+            stacklevel=2,
+        )
+
+    # プロファイルIDは "P1", "P2", ... の提示順（数値順）で並べる。
+    # 文字列のまま並べ替えると P1, P10, P11, P2, … の辞書順になってしまう。
+    profile_order = {pid: i for i, pid in enumerate(profile_ids)}
+    df_long = df_long.sort_values(
+        [respondent_id_colname, profile_id_colname],
+        key=lambda s: (
+            s.map(profile_order) if s.name == profile_id_colname else s
+        ),
+    )
     df_long = df_long.reset_index(drop=True)
 
     # ------------------------------------------------------------------
@@ -344,6 +394,9 @@ def _pick_rating_cols(
     優先順位：
     1. 数値型（または数値変換可能）の候補列が n_profiles 個以上ある
        → そのうち右端の n_profiles 列を採用
+       （候補が n_profiles を超える場合は、除外した列名を UserWarning で明示する。
+       　評点でない数値質問（満足度・年齢など）が混在していると、評点と
+       　プロファイルの対応が気づかないままズレる恐れがあるため。）
     2. 候補列全体が n_profiles 個以上ある
        → 右端の n_profiles 列を採用（数値変換できるか確認）
     3. 上記でも取得できなければ ValueError
@@ -355,7 +408,21 @@ def _pick_rating_cols(
     ]
 
     if len(numeric_candidates) >= n_profiles:
-        return numeric_candidates[-n_profiles:]
+        selected = numeric_candidates[-n_profiles:]
+        excluded = numeric_candidates[:-n_profiles]
+        if excluded:
+            warnings.warn(
+                f"数値の候補列が {len(numeric_candidates)} 列見つかったため、"
+                f"右端の {n_profiles} 列を評点列として採用しました。\n"
+                f"  採用した列: {selected}\n"
+                f"  除外した列: {excluded}\n"
+                "  除外された列に評点（プロファイルの設問）が含まれていないか、\n"
+                "  必ず確認してください。評点でない数値質問（満足度・年齢など）は\n"
+                "  respondent_cols 引数で指定すると候補から外れます。",
+                UserWarning,
+                stacklevel=3,
+            )
+        return selected
 
     if len(candidates) >= n_profiles:
         selected = candidates[-n_profiles:]
