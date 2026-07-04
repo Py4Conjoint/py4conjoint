@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import importlib
 
-__version__ = "0.4.0"
+__version__ = "0.4.1"
 
 # v0.3.x までトップレベルに存在した旧API名
 _REMOVED_API = frozenset({

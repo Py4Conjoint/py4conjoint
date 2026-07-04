@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [0.4.1] - 2026-07-04
+
+### Changed
+- `wtp()` / `plot_wtp()`（`rating`・`choice` 共通）：**区間別 WTP でない状況で `price_segment` を指定すると日本語の `ValueError`** を出すようにした（価格2水準・数値線形価格・`method="linear"` のとき）。従来は黙って無視されるため「指定した区間の値が出ている」と誤解する恐れがあった。区間別（価格3水準以上かつ `method="segment"`）での挙動は不変。
+- rating の `fit()` docstring（`encoded_columns`）に、回答者属性の 0/1 列（`respondent_encode` の出力）を説明変数に含めた場合、`importance()`・`wtp()` の出力にもその列が「属性」として現れるが、製品属性と同じようには解釈できない旨の注意書きを追加。
+- README の依存表の `openpyxl` を `≥ 3.1.5` に更新（pyproject と整合）。pyproject の `description` を「評点型・選択型コンジョイント分析…」に更新（choice 追加を反映）。
+- テスト：`__version__` の検証を特定のバージョン文字列とのハードコード比較ではなく、(1) semver 形式であること、(2) 配布メタデータ（`importlib.metadata.version`、pyproject 由来）と一致すること、の検証に変更。リリースでバージョンを上げてもテストが壊れず、`__init__.py` と pyproject のバージョン乖離は CI が確実に検知する。
+- `forms_to_data()`・`check_design()`（`rating`・`choice` 共通）と `design_signature()`（choice）：**pandas の行番号列（`Unnamed: 0` など）を警告付きで無視**するようにした。design / profiles を `to_csv()` で保存するとき `index=False` を付け忘れると、読み込んだ CSV に行番号（rating では P1, P2, … のプロファイルID）が `Unnamed: 0` 列として混入する。従来は無言で「属性」として扱われ、(1) `forms_to_data()` の出力に属性として混入、(2) choice では署名が元の設計と食い違い「同じ設計のはずなのに署名が合わない」という混乱を招き、(3) rating の `check_design()` ではプロファイル数と同数の水準を持つ架空の属性としてパラメータ数が膨らみ、正常な設計に `insufficient_profiles`（分析不能）などの**誤警告**が大量に出ていた。行番号は設計の中身ではないため、`forms_to_data()` は日本語警告（`index=False` を付けて保存する案内つき）のうえ属性から除外し、`check_design()`・`design_signature()` は黙って無視する。これにより **`index=False` を忘れて保存した CSV でも正しく動き、choice の署名も元の設計と一致する**（`to_csv()` は pandas のメソッドなので保存側の既定は変えられず、読み込み側で無害化する方針）。
+
+### Fixed
+- choice の `fit()`（条件付きロジットの最尤推定）が、大標本でまれに収束判定に失敗する問題を修正。最適化の目的関数を「合計」負の対数尤度から「1選択セットあたりの平均」に変更した。合計だと標本が大きいほど目的関数の絶対値が巨大になり、最適点近傍で BFGS の直線探索が浮動小数点の精度落ちを起こして `converged=False`（＝完全分離の誤警告）になることがあった（環境差で再現が不安定。CI の `test_synthetic_recovery` が推定値は正しいのに収束失敗で落ちていた）。平均化しても最小化の解は不変のため、係数・標準誤差・対数尤度・McFadden R² などの数値結果は一切変わらず、大標本でも収束判定が安定し、収束許容値 `gtol` が標本サイズに依らず一定の意味を持つようになる。
+- rating の `encode()`：**3水準以上の属性で欠損（NaN）が 0 に符号化されてしまう問題を修正**。`Series.map` が既定で NaN にも変換関数を適用するため、欠損行の全ダミー列が 0（効果コーディングでは「全水準の平均」を意味する値）になり、`fit()` の欠損除外をすり抜けて回帰に静かに混入していた。`na_action="ignore"` で欠損を欠損のまま残すよう修正し、2水準（NaN 保持）・choice 版（`pd.NA` 保持）と挙動を統一した。
+- choice の `design_signature()`：**署名が numpy のバージョンに依存する問題を修正**。セル値（numpy スカラー）の `repr` をそのままハッシュしていたため、numpy 2.x（`repr(np.int64(6))` → `'np.int64(6)'`）と 1.x（`'6'`）で同一設計の署名が食い違った。署名は「アンケート作成時と分析時（時間・環境をまたぐ）の design 同一性確認」が目的なので、ハッシュ前に Python の値へ正規化（`.item()`）して環境非依存にした（numpy 1.26 と 2.4 で同一署名になることを確認済み）。**注意**：numpy 2.x 環境でこれまでに記録した署名は今回の修正で値が変わる（numpy 1.x 環境の署名とは一致する）。`examples/overview_choice.ipynb` は再実行済み。
+- rating の `forms_to_data()`：**評点列の自動検出が無警告でズレ得る問題への対策**。数値の候補列が `n_profiles` を超える場合（評点でない数値質問——満足度・年齢など——が混在し `respondent_cols` で指定されていない場合）に、従来は右端の n 列を黙って採用して評点とプロファイルの対応が静かに崩れることがあった。採用列・除外列を明示する `UserWarning` を出すようにした。あわせて (1) 評点列を melt 後に `pd.to_numeric(errors="coerce")` で数値化（Forms 出力で評点が文字列 `"5"` の場合も `fit()` まで通る。数値化できない値は件数つきで警告して NaN → 既存の欠損処理に乗る）、(2) 出力の行順を `profile_id` の**提示順**（P1, P2, …, P10, …）に修正（従来は文字列の辞書順で `n_profiles ≥ 10` のとき P1, P10, P11, P2, … と並んだ。データの対応自体は正しく、行順のみの問題）。
+- `examples/` の3ノートブック（`overview.ipynb`・`overview_os.ipynb`・`overview_choice.ipynb`）の出力セルに残っていた旧バージョン表記 `0.4.0a1` を `0.4.0` に更新（コードは不変、表示のみ）。
+
+---
+
 ## [0.4.0] - 2026-06-17
 
 ### Added
@@ -41,7 +59,6 @@ All notable changes to this project will be documented in this file.
 - choice の `fit()` の既定列名を `forms_to_data()` の出力列名に整合させた。`choice_set_id_col` の既定 `"選択セットID"` → `"choice_set_id"`、`respondent_id_col` の既定 `"回答者ID"` → `"respondent_id"`。従来は `forms_to_data()` が英語列（`choice_set_id`・`respondent_id`）を出力する一方、`fit()` の既定が日本語のままで不一致だったため、`pcc.fit(df_coded)` を列名引数なしで呼ぶと選択セット列が見つからずエラーになったり、回答者ID列が認識されずクラスタロバスト標準誤差が効かず `independence_assumed` 警告が出たりしていた。これで `forms_to_data() → encode() → fit()` の標準的な流れが列名引数なしでそのまま動く（rating 側の `respondent_id` 既定とも揃う）。エラーメッセージ内の表示ラベル（「選択セットID」など和文）は従来どおり。`tests/test_forms_to_data_rename.py` に列名引数なしでクラスタSEが適用される検証を追加。
 - `forms_to_data()`：実 Microsoft Forms の回答ファイル（設問列が長文・改行・全角空白・`\xa0` を含み、性別・利用OS などの属性質問が混在する）で、設問列の自動検出が失敗していた問題を修正。実ファイル（3人分の回答）での回帰テスト `tests/test_choice_forms_real.py` を追加。
 - `forms_to_data(forms="google")`：実 Google Forms の回答 CSV（BOMなしUTF-8、設問列名に `【設問N】` などの識別子接頭辞、属性質問の混在）でも正しく変換できることを確認。読み込みは共通ヘルパー経由で `encoding="utf-8-sig"` を使うため BOMなし・BOM付きの両方に対応する。設問列の検出は回答値ベースのため接頭辞の有無に依存しない（設問の順序は列の出現順に従う）。実 Google ファイル（3人分）での検証テストを `tests/test_choice_forms_real.py` に追加。docstring と `examples/overview_choice.ipynb` に、Google の CSV は BOMなしUTF-8 のため Excel で開くと文字化けするが py4conjoint は正しく読める旨を注記。
-- choice の `fit()`（条件付きロジットの最尤推定）が、大標本でまれに収束判定に失敗する問題を修正。最適化の目的関数を「合計」負の対数尤度から「1選択セットあたりの平均」に変更した。合計だと標本が大きいほど目的関数の絶対値が巨大になり、最適点近傍で BFGS の直線探索が浮動小数点の精度落ちを起こして `converged=False`（＝完全分離の誤警告）になることがあった（環境差で再現が不安定。CI の `test_synthetic_recovery` が推定値は正しいのに収束失敗で落ちていた）。平均化しても最小化の解は不変のため、係数・標準誤差・対数尤度・McFadden R² などの数値結果は一切変わらず、大標本でも収束判定が安定し、収束許容値 `gtol` が標本サイズに依らず一定の意味を持つようになる。
 
 ### Removed
 - トップレベルAPI（`pc.fit`・`pc.encode` 等）を廃止。旧API名へアクセスすると日本語の `AttributeError` で `py4conjoint.rating` への移行を案内する（`__version__` などの正当な属性は従来どおり）。
