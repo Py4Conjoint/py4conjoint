@@ -95,7 +95,11 @@ def forms_to_data(
     ----------
     responses_file : str
         Forms からダウンロードした回答ファイルのパス。
-        Microsoft Forms の場合は .xlsx、Google Forms の場合は .csv。
+        Microsoft Forms の場合は .xlsx / .csv のどちらでも読み込めるが、
+        **.csv を推奨**する（追加パッケージが不要で、ブラウザ上の
+        Jupyter でもファイルが壊れないため）。ダウンロードした .xlsx を
+        Excel で開き、「CSV UTF-8（コンマ区切り）」で保存し直せばよい。
+        Google Forms の場合は .csv。
 
     design : pd.DataFrame
         :func:`design_choice_sets` の出力DataFrame
@@ -121,17 +125,25 @@ def forms_to_data(
 
     forms : {"microsoft", "google"}, default "microsoft"
         使用するFormsの種類を指定する。
-        "microsoft" : Microsoft Forms（.xlsx形式）
+        "microsoft" : Microsoft Forms（.csv 推奨。.xlsx も可）
         "google"    : Google Forms（.csv形式）
+
+        .. note::
+            "microsoft" では .xlsx / .csv のどちらも読み込めるが、**.csv を
+            推奨**する。.csv なら Excel を読むための追加パッケージ
+            （openpyxl など）が不要で、ブラウザ上の Jupyter でもファイルが
+            壊れないためである。ダウンロードした .xlsx を Excel で開き、
+            「CSV UTF-8（コンマ区切り）」で保存し直してから渡すこと
+            （forms="microsoft" のままでよい）。
 
         .. note::
             Google Forms からダウンロードした CSV は **BOMなしUTF-8** のことが
             多く、Excel でそのまま開くと日本語が文字化けする。しかしファイル
             自体は正常で、本関数は BOMなし・BOM付きの両方を正しく読み込む
-            （``encoding="utf-8-sig"``）。Excel で中身を確認したい場合は、
-            Google スプレッドシートに取り込んでから ``.xlsx`` で書き出すか、
-            Excel の「データ」→「テキスト/CSVから」で文字コードに UTF-8 を
-            指定してインポートすること。
+            （``encoding="utf-8-sig"``）ため、変換せずそのまま渡してよい。
+            Excel で中身を確認したい場合は、Google スプレッドシートに
+            取り込んで表示するか、Excel の「データ」→「テキスト/CSVから」で
+            文字コードに UTF-8 を指定してインポートすること。
 
     version : int, default 1
         design のどのバージョンを使うか。
@@ -319,11 +331,17 @@ def forms_to_data(
             "ファイル名とパスを確認してください。"
         )
 
-    if forms == "microsoft" and csv_path.suffix.lower() not in (".xlsx", ".xls"):
+    # forms="microsoft" なのに .xlsx/.xls/.csv 以外の拡張子の場合は警告を出す
+    # （.csv は正式にサポートしており、むしろ推奨のため警告しない）
+    if forms == "microsoft" and csv_path.suffix.lower() not in (
+        ".xlsx",
+        ".xls",
+        ".csv",
+    ):
         warnings.warn(
             f"forms='microsoft' が指定されていますが、\n"
             f"ファイルの拡張子が '{csv_path.suffix}' です。\n"
-            "Microsoft Forms のダウンロードファイルは通常 .xlsx 形式です。\n"
+            "Microsoft Forms のファイルは .xlsx または .csv です。\n"
             "Google Forms のファイルを使う場合は forms='google' を指定してください。",
             UserWarning,
             stacklevel=2,

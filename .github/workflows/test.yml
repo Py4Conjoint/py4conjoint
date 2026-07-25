@@ -6,12 +6,23 @@ on:
   pull_request:
     branches: ["main"]
 
+# .xlsx を to_excel() で生成するテストファイル（生成は openpyxl 専用で、
+# JupyterLite でも動かない）。エンジンを制限したジョブでは実行できないため、
+# (A)(B) の両方から同じリストを参照する（2か所に手書きしない）。
+env:
+  WRITE_XLSX_IGNORES: >-
+    --ignore=tests/test_rating_forms.py
+    --ignore=tests/test_choice_forms.py
+    --ignore=tests/test_choice_design_signature.py
+    --ignore=tests/test_choice_set_id_rename.py
+    --ignore=tests/test_forms_to_data_rename.py
+
 jobs:
   test:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.9", "3.11", "3.13"]
+        python-version: ["3.9", "3.11", "3.13", "3.14"]
 
     steps:
       - name: リポジトリをチェックアウト
@@ -27,3 +38,72 @@ jobs:
 
       - name: テストを実行
         run: pytest --tb=short -v
+
+  # (A) Excel エンジンなし：openpyxl も python-calamine も入れない構成。
+  #     import が通り、CSV 経路（推奨経路）が動くことを確認する。
+  test-without-excel-engine:
+    name: エンジンなし（CSV 経路）
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v6
+
+      - name: Python 3.10 をセットアップ
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"
+
+      # test extra には openpyxl / python-calamine が含まれるため使わない
+      - name: 本体と pytest のみをインストール
+        run: |
+          pip install -e .
+          pip install pytest
+
+      - name: Excel エンジンが入っていないことを確認
+        run: |
+          python -c "import importlib.util as u; assert u.find_spec('openpyxl') is None, 'openpyxl が入っています'"
+          python -c "import importlib.util as u; assert u.find_spec('python_calamine') is None, 'python-calamine が入っています'"
+
+      - name: import できることを確認
+        run: python -c "import py4conjoint; print(py4conjoint.__version__)"
+
+      # 書き込み5ファイルに加え、実 .xlsx を読む test_choice_forms_real.py も
+      # 除外する（読み込みにはエンジンが要るため、この構成では通らない）
+      # $WRITE_XLSX_IGNORES の展開は単語分割に依存するため shell を明示する
+      # （既定シェルが変わると --ignore が静かに効かなくなるのを防ぐ）
+      - name: テストを実行
+        shell: bash
+        run: |
+          pytest --tb=short -v $WRITE_XLSX_IGNORES \
+            --ignore=tests/test_choice_forms_real.py
+
+  # (B) calamine のみ：JupyterLite / Pyodide と同じ構成。
+  #     .xlsx の「読み込み」が通ることを確認する（今回のリリースで最重要）。
+  test-calamine-only:
+    name: calamine のみ（JupyterLite 相当）
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v6
+
+      - name: Python 3.14 をセットアップ
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+
+      # test extra には openpyxl が含まれるため使わない
+      - name: 本体・pytest・calamine をインストール（openpyxl は入れない）
+        run: |
+          pip install -e .
+          pip install pytest python-calamine
+
+      - name: openpyxl が入っていないことを確認
+        run: python -c "import importlib.util as u; assert u.find_spec('openpyxl') is None, 'openpyxl が入っています'"
+
+      # 読み専用の2ファイル（test_choice_forms_real.py / test_excel_fallback.py）は
+      # 除外せず必ず走らせる。これが calamine 単独での .xlsx 読み込みの証明になる。
+      - name: テストを実行
+        shell: bash
+        run: pytest --tb=short -v $WRITE_XLSX_IGNORES

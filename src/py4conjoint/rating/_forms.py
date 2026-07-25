@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import re
 import warnings
+import zipfile
 from pathlib import Path
 from typing import Dict, List, Literal, Optional, Sequence
 
@@ -45,7 +46,11 @@ def forms_to_data(
     ----------
     responses_file : str
         Forms からダウンロードした回答ファイルのパス。
-        Microsoft Forms の場合は .xlsx、Google Forms の場合は .csv。
+        Microsoft Forms の場合は .xlsx / .csv のどちらでも読み込めるが、
+        **.csv を推奨**する（追加パッケージが不要で、ブラウザ上の
+        Jupyter でもファイルが壊れないため）。ダウンロードした .xlsx を
+        Excel で開き、「CSV UTF-8（コンマ区切り）」で保存し直せばよい。
+        Google Forms の場合は .csv。
 
     profiles : pd.DataFrame または dict
         プロファイル設計を指定する。以下の2形式を受け付ける。
@@ -83,8 +88,16 @@ def forms_to_data(
 
     forms : {"microsoft", "google"}, default "microsoft"
         使用するFormsの種類を指定する。
-        "microsoft" : Microsoft Forms（.xlsx形式）
+        "microsoft" : Microsoft Forms（.csv 推奨。.xlsx も可）
         "google"    : Google Forms（.csv形式）
+
+        .. note::
+            "microsoft" では .xlsx / .csv のどちらも読み込めるが、**.csv を
+            推奨**する。.csv なら Excel を読むための追加パッケージ
+            （openpyxl など）が不要で、ブラウザ上の Jupyter でもファイルが
+            壊れないためである。ダウンロードした .xlsx を Excel で開き、
+            「CSV UTF-8（コンマ区切り）」で保存し直してから渡すこと
+            （forms="microsoft" のままでよい）。
 
     respondent_cols : dict, optional
         回答者属性として残したい列の対応辞書。
@@ -168,12 +181,17 @@ def forms_to_data(
             "ファイル名とパスを確認してください。"
         )
 
-    # forms="microsoft" なのに .xlsx/.xls 以外の拡張子の場合は警告を出す
-    if forms == "microsoft" and csv_path.suffix.lower() not in (".xlsx", ".xls"):
+    # forms="microsoft" なのに .xlsx/.xls/.csv 以外の拡張子の場合は警告を出す
+    # （.csv は正式にサポートしており、むしろ推奨のため警告しない）
+    if forms == "microsoft" and csv_path.suffix.lower() not in (
+        ".xlsx",
+        ".xls",
+        ".csv",
+    ):
         warnings.warn(
             f"forms='microsoft' が指定されていますが、\n"
             f"ファイルの拡張子が '{csv_path.suffix}' です。\n"
-            "Microsoft Forms のダウンロードファイルは通常 .xlsx 形式です。\n"
+            "Microsoft Forms のファイルは .xlsx または .csv です。\n"
             "Google Forms のファイルを使う場合は forms='google' を指定してください。",
             UserWarning,
             stacklevel=2,
@@ -303,23 +321,120 @@ def forms_to_data(
 # 内部ヘルパー関数：ファイル読み込み
 # ---------------------------------------------------------------------------
 
+# Excel の読み込みエンジン。calamine は JupyterLite（Pyodide）に同梱されて
+# いて高速だが pandas>=2.2 が必要なため、openpyxl を後続の候補に置く。
+_EXCEL_ENGINES = ("calamine", "openpyxl")
+
+# 読み込めなかったときの共通の対処法（CSV で保存し直す手順）。
+_EXCEL_TO_CSV_HINT = (
+    "\n"
+    "  【対処法】\n"
+    "  1. このファイルを Excel で開く\n"
+    "  2. 「名前を付けて保存」で「CSV UTF-8（コンマ区切り）(*.csv)」を選んで保存する\n"
+    "  3. 保存した .csv をこの関数に渡す\n"
+    '     （forms="microsoft" のままで .csv を読み込めます）'
+)
+
+# ZIP 構造の検査で弾いた場合の案内。.xlsx は ZIP 形式と決まっているので、
+# 構造が違えば破損が確定している（断定してよい）。
+_CORRUPT_XLSX_MESSAGE = (
+    "Excel ファイル（{ext}）を読み込めませんでした。\n"
+    "  ファイル：{path}\n"
+    "  サイズ：{size} バイト\n"
+    "  このファイルは壊れている可能性が高いです。\n"
+    "  JupyterLite やブラウザ上の Jupyter では、ファイルを転送するときに\n"
+    "  .xlsx が壊れてしまうことがあります。\n" + _EXCEL_TO_CSV_HINT
+)
+
+# エンジンが実際に読みにいって失敗した場合の案内。破損とは限らない
+# （形式が非対応、そのエンジンが対応しない構造、など）ので断定しない。
+_UNREADABLE_EXCEL_MESSAGE = (
+    "Excel ファイル（{ext}）を読み込めませんでした。\n"
+    "  ファイル：{path}\n"
+    "  サイズ：{size} バイト\n"
+    "  ファイルが壊れているか、この形式に対応していない可能性があります。\n"
+    "  JupyterLite やブラウザ上の Jupyter では、ファイルを転送するときに\n"
+    "  {ext} が壊れてしまうことがあります。\n" + _EXCEL_TO_CSV_HINT + "\n"
+    "\n"
+    "  各エンジンで発生したエラー：\n{read_errors}"
+)
+
+# どのエンジンも使えなかった場合の案内（インストール方法）。
+_NO_EXCEL_ENGINE_MESSAGE = (
+    "Excel ファイル（{ext}）を読み込むには、追加のパッケージが必要です。\n"
+    "  次のいずれかをインストールしてください：\n"
+    "    pip install py4conjoint[excel]  （openpyxl が入ります）\n"
+    "    pip install python-calamine     （高速な代替。pandas>=2.2 が必要です）\n"
+    "\n"
+    "  追加インストールが難しい場合は、このファイルを Excel で開き\n"
+    "  「CSV UTF-8（コンマ区切り）(*.csv)」で保存し直してから、その .csv を\n"
+    '  この関数に渡してください（forms="microsoft" のままで読み込めます）。\n'
+    "\n"
+    "  各エンジンで発生したエラー：\n{engine_errors}"
+)
+
+
 def _read_microsoft_forms(path: Path) -> pd.DataFrame:
     """
     Microsoft Forms の回答ファイルを読み込む。
+
     .xlsx を想定するが、.csv（BOM付きUTF-8）も受け付ける。
+
+    .xlsx は ZIP 形式なので、読み込む前に :func:`zipfile.is_zipfile` で
+    構造を検査する。壊れている場合はエンジンを試さずに、CSV で保存し直す
+    方法を案内する（.xls は ZIP 形式ではないため検査しない）。
+
+    構造検査を通ったら、読み込みエンジンを calamine → openpyxl の順に
+    試す。あるエンジンが読みに失敗しても、そこで打ち切らず次のエンジンを
+    試す（先頭の calamine が失敗しても openpyxl なら読める場合があるため）。
+    すべて失敗したときだけ、原因に応じたエラーを出す。
     """
     suffix = path.suffix.lower()
-    if suffix in (".xlsx", ".xls"):
-        try:
-            return pd.read_excel(path, engine="openpyxl")
-        except ImportError:
-            raise ImportError(
-                "Microsoft Forms の .xlsx ファイルを読み込むには openpyxl が必要です。\n"
-                "以下のコマンドでインストールしてください：\n"
-                "  pip install openpyxl"
+    if suffix not in (".xlsx", ".xls"):
+        # .csv の場合（BOM付きUTF-8）
+        return pd.read_csv(path, encoding="utf-8-sig")
+
+    if suffix == ".xlsx" and not zipfile.is_zipfile(path):
+        raise ValueError(
+            _CORRUPT_XLSX_MESSAGE.format(
+                ext=path.suffix, path=path, size=path.stat().st_size
             )
-    # .csv の場合（BOM付きUTF-8）
-    return pd.read_csv(path, encoding="utf-8-sig")
+        )
+
+    engine_errors: List[str] = []  # エンジンが使えなかった（未インストール等）
+    read_errors: List[str] = []  # エンジンは動いたが読めなかった
+    last_read_error: Optional[BaseException] = None
+    for engine in _EXCEL_ENGINES:
+        try:
+            return pd.read_excel(path, engine=engine)
+        except (ImportError, ValueError) as e:
+            # ImportError：エンジンが未インストール
+            # ValueError ：pandas<2.2 が engine="calamine" を知らない
+            engine_errors.append(f"    - {engine}：{type(e).__name__}: {e}")
+        except Exception as e:
+            # zipfile.BadZipFile や calamine 由来の例外など。
+            # このエンジンでは読めなかっただけかもしれないので、
+            # ここでは打ち切らず、記録して次のエンジンを試す。
+            read_errors.append(f"    - {engine}：{type(e).__name__}: {e}")
+            last_read_error = e
+
+    if read_errors:
+        # 少なくとも1つのエンジンが実際に読みにいって失敗している。
+        # ファイル側の問題の可能性が高いので、CSV で保存し直す方法を案内する。
+        raise ValueError(
+            _UNREADABLE_EXCEL_MESSAGE.format(
+                ext=path.suffix,
+                path=path,
+                size=path.stat().st_size,
+                read_errors="\n".join(read_errors),
+            )
+        ) from last_read_error
+
+    raise ImportError(
+        _NO_EXCEL_ENGINE_MESSAGE.format(
+            ext=path.suffix, engine_errors="\n".join(engine_errors)
+        )
+    )
 
 
 def _read_google_forms(path: Path) -> pd.DataFrame:

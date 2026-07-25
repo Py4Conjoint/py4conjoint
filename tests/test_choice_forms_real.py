@@ -7,6 +7,7 @@
 - 3人分の選択が実回答と一致すること
 を確認する。
 """
+import importlib.util
 import sys
 from pathlib import Path
 
@@ -21,6 +22,15 @@ DATA_DIR = Path(__file__).resolve().parent / "data"
 RESPONSES = DATA_DIR / "forms_cbc_smartphone_real.xlsx"
 GOOGLE_RESPONSES = DATA_DIR / "forms_cbc_smartphone_google.csv"
 DESIGN_CSV = DATA_DIR / "design_smartphone_cbc.csv"
+
+# .xlsx を直接読むときの読み込みエンジン。engine を省略すると pandas の
+# 既定（openpyxl）に暗黙依存し、calamine のみの環境（JupyterLite 相当）で
+# 落ちるため明示する。優先順位は本体の _EXCEL_ENGINES に合わせる。
+EXCEL_ENGINE = (
+    "calamine"
+    if importlib.util.find_spec("python_calamine") is not None
+    else "openpyxl"
+)
 
 LABELS = ["製品A", "製品B", "製品C"]
 N_RESP = 3
@@ -103,7 +113,7 @@ def test_real_forms_attributes_match_design(design):
 
 def test_real_forms_keep_attribute_questions_via_respondent_cols(design):
     """性別・利用OS の属性質問を respondent_cols で回答者属性として残せる。"""
-    raw = pd.read_excel(RESPONSES)
+    raw = pd.read_excel(RESPONSES, engine=EXCEL_ENGINE)
     gender_col = next(c for c in raw.columns if c.startswith("あなたの性別"))
     os_col = next(c for c in raw.columns if c.startswith("現在使っている"))
 
