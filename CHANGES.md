@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [0.5.0] - 2026-07-25
+
+### Changed
+- **【破壊的変更】`openpyxl` を必須依存から外した**。`.xlsx`（Microsoft Forms のダウンロードファイル）を読むには `pip install py4conjoint[excel]` が必要になる。`.csv` だけを使う場合は追加インストール不要。理由は、ブラウザ上で動く JupyterLite（Pyodide）に `openpyxl` が同梱されておらず、必須依存のままでは**パッケージの導入自体ができない**ため。従来 `pip install py4conjoint` だけで `.xlsx` が読めていた利用者は、`pip install py4conjoint[excel]` に切り替えるか、後述のとおり `.csv` を使う運用に変えてほしい。
+- **【破壊的変更】Microsoft Forms の推奨入力形式を `.xlsx` から `.csv` に変更**した。`forms="microsoft"` に `.csv` を渡しても警告が出なくなり、`.csv` が正式な推奨経路になった（従来は「Microsoft Forms のダウンロードファイルは通常 .xlsx 形式です」という警告が出ていた）。`.csv` なら Excel を読むための追加パッケージが不要で、ブラウザ上の Jupyter でもファイルが壊れない。Forms からダウンロードした `.xlsx` を Excel で開き「CSV UTF-8（コンマ区切り）」で保存し直せばよい（`forms="microsoft"` のままでよい）。`.xlsx` も従来どおり読める。
+- **`.xlsx` の読み込みエンジンを calamine → openpyxl の順にフォールバックする**ようにした。`python-calamine` は Pyodide に同梱されているため、ブラウザ環境では追加導入なしで `.xlsx` を読める。先頭のエンジンが読みに失敗しても、そこで打ち切らず次のエンジンを試す（`openpyxl` なら読めるファイルを「壊れている」と誤診しないため）。どのエンジンも使えない場合は、`pip install py4conjoint[excel]` などの導入方法を示す日本語の `ImportError` を出す。
+- `scipy` を必須依存に追加（0.4.0 で choice の最尤推定に `scipy.optimize` を使うようになったための変更）。0.4.0 / 0.4.1 は PyPI 未公開のため、**公開版としては 0.5.0 が `scipy` 依存の初出**となる。
+- `[project.optional-dependencies]` に `excel`（`openpyxl>=3.1.5`）と `excel-fast`（`python-calamine>=0.6`、Python 3.10 以上）を追加。`excel-fast` に環境マーカーを付けているのは、`python-calamine` 0.5 以降が Python 3.9 に対応しておらず、マーカーなしだと 3.9 で `pip install py4conjoint[excel-fast]` が「該当バージョンなし」で失敗するため。下限を `0.6` にしたのは、0.4.0 以前がセル内改行を CRLF のまま返し `openpyxl` と読み取り結果が食い違うためで、Pyodide 同梱版（0.6.2）と同じ下限に揃えている。
+
+### Fixed
+- **破損した `.xlsx` に対して、日本語で対処法を示すエラーを出す**ようにした。従来は `BadZipFile` や calamine 由来の例外（英語）がそのまま出て、初学者には原因も対処法も分からなかった。ブラウザ上の Jupyter ではファイル転送時に `.xlsx` が壊れることがあり、この経路が実際に踏まれやすい。破損の性質によって文言を分けている：(1) ZIP 構造が壊れている場合（`.xlsx` は ZIP 形式なので、読み込み前に `zipfile.is_zipfile()` で検査する）は破損が確定しているため「壊れている可能性が高いです」と断定し、エンジンを試さずに即座にエラーとする、(2) ZIP としては正常でエンジンが読みに失敗した場合は「ファイルが壊れているか、この形式に対応していない可能性があります」と断定を避け、各エンジンで発生したエラーの内訳を併記する。いずれも実際のファイルサイズと、Excel で開いて「CSV UTF-8（コンマ区切り）」で保存し直す手順を案内する。
+- rating の `forms_to_data()`：`forms="microsoft"` に `.csv` を渡したときの不要な `UserWarning` を出さないようにした（choice 側も同じ変更。両サブパッケージで挙動が揃っている）。
+
+### Added
+- CI に **「Excel エンジンなし」** と **「calamine のみ（JupyterLite 相当）」** の2ジョブを追加。前者は `openpyxl` も `python-calamine` も無い環境で `import py4conjoint` が成功し `.csv` 経路が動くこと、後者は本番の Pyodide と同じ構成で `.xlsx` の**読み込み**が通ることを検証する。いずれも `test` extra（両エンジンを含む）を使わず、`pip install -e .` と個別インストールで環境を作る。あわせてテストの matrix に **Python 3.14** を追加した（Pyodide の安定版が Python 3.14 のため）。
+- `tests/test_excel_fallback.py` を追加。壊れた `.xlsx` の2パターン（ZIP 構造が壊れているもの／ZIP は正常で中身の XML が壊れているもの）を `tests/conftest.py` のフィクスチャで実行時に生成し、エラー文言・エンジンのフォールバック・エンジン不在時の案内・`.csv` 経路の無警告を、`rating`・`choice` の両方で検証する。
+
+---
+
 ## [0.4.1] - 2026-07-04
 
 ### Changed

@@ -28,6 +28,24 @@ Google Colab では：
 !pip install py4conjoint
 ```
 
+### Excel ファイル（.xlsx）を読む場合
+
+Microsoft Forms からダウンロードした `.xlsx` を読むには、追加のパッケージが必要です。
+
+```bash
+pip install py4conjoint[excel]
+```
+
+**`.csv` だけを使う場合、追加インストールは不要です。**
+Microsoft Forms のファイルも `.csv` に保存し直せばそのまま読めます
+（→ [Microsoft Forms のデータを使う](#microsoft-forms-のデータを使う)）。
+
+高速な代替エンジンを使いたい場合は、次でも `.xlsx` を読めます（任意）。
+
+```bash
+pip install py4conjoint[excel-fast]
+```
+
 ## 評点型コンジョイント分析（rating）
 
 ### クイックスタート
@@ -46,6 +64,7 @@ profiles = { # P1         P2       P3        P4
 }
 
 # Microsoft Forms の回答ファイルを読み込む（デフォルト）
+# .csv も渡せます（推奨。→「Microsoft Forms のデータを使う」節）
 df = pcr.forms_to_data(
     responses_file  = "responses.xlsx",
     profiles        = profiles,
@@ -235,6 +254,7 @@ design.to_csv("design.csv", index=False)
 
 ```python
 # 1設問 = 1選択セット。回答選択肢（例：「製品A」「製品B」「製品C」）が代替案
+# .csv も渡せます（推奨。→「Microsoft Forms のデータを使う」節）
 df = pcc.forms_to_data(
     responses_file = "responses.xlsx",
     design         = design,
@@ -346,7 +366,56 @@ result.plot_wtp(price_unit="円")  # WTPの棒グラフ
 | `price_insignificant` | 中 | 価格係数の p 値 ≥ 0.10（WTP の信頼性低下） |
 | `wtp_extrapolation` | 中 | \|WTP\| > 価格レンジ × 2（外挿値） |
 
+## Microsoft Forms のデータを使う
+
+Microsoft Forms の回答ファイルは `.xlsx` / `.csv` のどちらでも読めますが、
+**`.csv` を推奨します**。理由は2つあります。
+
+- Excel を読むための追加パッケージ（`py4conjoint[excel]`）が不要
+- ブラウザ上で動く Jupyter でファイルが壊れることがない
+
+手順は次のとおりです。
+
+1. Microsoft Forms から回答ファイル（`.xlsx`）をダウンロードする
+2. そのファイルを Excel で開く
+3. 「名前を付けて保存」で **「CSV UTF-8（コンマ区切り）(*.csv)」** を選んで保存する
+4. 保存した `.csv` を `forms_to_data()` に渡す
+
+```python
+# forms="microsoft" のまま .csv を渡せます（警告は出ません）
+df = pcr.forms_to_data(
+    responses_file = "responses.csv",
+    profiles       = profiles,
+)
+```
+
+`forms="google"` に変える必要はありません。`forms` は「どの Forms で
+集めたか」を指定する引数で、ファイル形式を指定するものではないためです。
+
+## ブラウザ版 Jupyter（JupyterLite / Pyodide）で使う場合
+
+py4conjoint は `.xlsx` を読むとき、python-calamine → openpyxl の順に
+エンジンを試します。
+
+- **openpyxl は Pyodide に同梱されていません。**
+- 新しめの Pyodide には python-calamine が同梱されているため、
+  追加インストールなしで `.xlsx` を読める場合があります。
+- ただし `engine="calamine"` は pandas 2.2 で追加された機能のため、
+  **pandas 2.2 より古い Pyodide では python-calamine を指定できません。
+  この環境には openpyxl も無いため、`.xlsx` はどちらのエンジンでも
+  読めません**（この場合は追加インストールを案内する日本語のエラーが
+  出ます）。なお、ローカル環境で pandas 2.2 より古い場合は、openpyxl が
+  入っていればそちらにフォールバックして読み込めます。
+- また `.xlsx` は、ブラウザ環境でのファイル転送時に壊れることが
+  あります。その場合も日本語のエラーで `.csv` への変換手順を案内します。
+
+**`.csv` であれば確実です。** 追加パッケージも読み込みエンジンも不要で、
+どの環境でも読み込めます。上の「Microsoft Forms のデータを使う」の手順で
+`.csv` に変換しておくことをおすすめします。
+
 ## 依存パッケージ
+
+### 必須
 
 | パッケージ | バージョン |
 |-----------|-----------|
@@ -355,7 +424,20 @@ result.plot_wtp(price_unit="円")  # WTPの棒グラフ
 | scipy | ≥ 1.8 |
 | statsmodels | ≥ 0.13 |
 | matplotlib | ≥ 3.4 |
-| openpyxl | ≥ 3.1.5 |
+
+### オプション（Excel ファイルを読む場合のみ）
+
+`.csv` だけを使う場合は不要です。
+
+| パッケージ | バージョン | extra 名 | 用途 |
+|-----------|-----------|---------|------|
+| openpyxl | ≥ 3.1.5 | `excel` | `.xlsx`（Excel ファイル）を読むために必要 |
+| python-calamine | ≥ 0.6 | `excel-fast` | `.xlsx` を読むための代替エンジン |
+
+`.xlsx` を読むときは python-calamine → openpyxl の順に試します。
+**openpyxl が入っていれば確実に読めます。**
+（python-calamine は Python 3.10 以上、および pandas 2.2 以上が
+必要です。openpyxl はどの pandas でも使えます。）
 
 ## ライセンス
 
