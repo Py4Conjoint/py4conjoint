@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [Unreleased]
+
+### Added
+- rating の `forms_to_data()` に **`rating_range` 引数**（キーワード専用、既定 `None`）を追加。評点として取りうる値の範囲を `rating_range=(1, 10)` のように渡すと、評点列を**位置ではなく値の内容から**同定できる。choice の `forms_to_data()` が `choice_labels` で「答えはこの選択肢のどれか」を受け取っているのと対になる引数で、`pcr` / `pcc` の非対称性を埋めるもの。指定すると (1) 非欠損値が**すべて**範囲の外側である列（年齢・満足度などの数値設問）を評点列の候補から外し、(2) 採用した評点列に範囲外の値があれば、列名・値・該当する `respondent_id` を示す `ValueError` を出す（入力ミスの検出）。従来は、プロファイルの設問より後ろに数値の設問があるファイルでは、警告は出るものの評点とプロファイルの対応が1つずれた DataFrame が返っていた（例：真の評点 `[9, 7, 3, 9]` + 年齢 20 → `[7, 3, 9, 20]`）。`rating_range` を省略した場合の挙動は従来どおりで、後方互換。
+
+---
+
 ## [0.5.0] - 2026-07-25
 
 ### Changed

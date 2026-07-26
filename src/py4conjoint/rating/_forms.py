@@ -14,7 +14,7 @@ import re
 import warnings
 import zipfile
 from pathlib import Path
-from typing import Dict, List, Literal, Optional, Sequence
+from typing import Dict, List, Literal, Optional, Sequence, Tuple
 
 import pandas as pd
 
@@ -34,6 +34,7 @@ def forms_to_data(
     n_profiles: Optional[int] = None,
     forms: Literal["microsoft", "google"] = "microsoft",
     respondent_cols: Optional[Dict[str, str]] = None,
+    rating_range: Optional[Tuple[float, float]] = None,
     profile_id_prefix: str = "P",
     rating_colname: str = "rating",
     respondent_id_colname: str = "respondent_id",
@@ -106,6 +107,27 @@ def forms_to_data(
         例：{"性別": "gender", "学年": "year"}
         省略した場合は回答者属性を付与しない。
 
+    rating_range : (float, float), optional
+        評点として取りうる値の範囲を (最小値, 最大値) で指定する。
+        例：1〜10 の10段階評価なら rating_range=(1, 10)
+
+        選択型の ``pcc.forms_to_data()`` の choice_labels に相当する引数。
+        choice_labels が「答えはこの選択肢のどれか」を伝えるのに対し、
+        rating_range は「答えはこの範囲の数値」を伝える。これにより、
+        評点列を位置（右端の n_profiles 列）ではなく **値の内容** から
+        同定できるようになる。
+
+        指定すると次の2つを行う。
+
+        1. 値がすべて範囲の外側である列（年齢・満足度など）を評点列の
+           候補から外す。プロファイルの設問より後ろに数値の設問がある
+           ファイルでも、評点とプロファイルの対応がずれなくなる。
+        2. 評点列として採用した列に範囲外の値があれば ValueError を出す
+           （入力ミスの検出）。どの列のどの回答かも示す。
+
+        省略した場合はこれらを行わず、右端の n_profiles 列を評点列と
+        みなす従来の挙動になる。
+
     profile_id_prefix : str, default "P"
         プロファイルIDの接頭辞。"P" なら P1, P2, P3, P4 となる。
 
@@ -137,6 +159,10 @@ def forms_to_data(
         属性の水準リストの長さが揃っていない場合。
         respondent_cols で指定された列がファイルにない場合。
         評点列が推測されたプロファイル数分見つからない場合。
+        rating_range を指定したのに、評点列とみなせる候補が n_profiles 列
+        分残らなかった場合（rating_range が実際の評点尺度と合っていない
+        可能性が高い）。
+        rating_range を指定し、採用した評点列に範囲外の値があった場合。
     """
 
     # ------------------------------------------------------------------
@@ -227,7 +253,7 @@ def forms_to_data(
     rating_candidate_cols = [c for c in raw.columns if c not in non_rating_cols]
 
     rating_cols = _pick_rating_cols(
-        rating_candidate_cols, raw, n_profiles, responses_file
+        rating_candidate_cols, raw, n_profiles, responses_file, rating_range
     )
 
     # ------------------------------------------------------------------
@@ -507,11 +533,22 @@ def _pick_rating_cols(
     df: pd.DataFrame,
     n_profiles: int,
     csv_path: str,
+    rating_range: Optional[Tuple[float, float]] = None,
 ) -> List[str]:
     """
     評点列を candidates から n_profiles 列分選ぶ。
 
     優先順位：
+    0. rating_range が指定されている場合、まず「非NaN値がすべて範囲の外側」の
+       候補列を除外する（年齢・満足度などの数値設問を落とすため）。
+       残りがちょうど n_profiles 列なら、位置による推測が不要になったので
+       そのまま採用する（このとき警告は一切出さない。曖昧さが残っていない
+       のに警告を出すと、本当に危ない警告に気づけなくなるため）。
+       残りが n_profiles 列より多ければ 1. と同じ扱いになり、このとき
+       だけ「候補から外した列」を UserWarning で知らせる。
+       残りが n_profiles 列に満たなければ ValueError（rating_range が実際の
+       評点尺度と合っていない可能性が高い）。
+       採用が決まったあと、その列に範囲外の値があれば ValueError を出す。
     1. 数値型（または数値変換可能）の候補列が n_profiles 個以上ある
        → そのうち右端の n_profiles 列を採用
        （候補が n_profiles を超える場合は、除外した列名を UserWarning で明示する。
@@ -520,12 +557,45 @@ def _pick_rating_cols(
     2. 候補列全体が n_profiles 個以上ある
        → 右端の n_profiles 列を採用（数値変換できるか確認）
     3. 上記でも取得できなければ ValueError
+
+    rating_range を指定した場合、2.（数値変換できない列を右端から採用する
+    フォールバック）には進まない。値の内容で同定できる情報が与えられて
+    いるのに、位置で当てにいくのは誤りを見逃すことになるため。
     """
     numeric_candidates = [
         c
         for c in candidates
         if pd.api.types.is_numeric_dtype(df[c]) or _is_coercible_to_numeric(df[c])
     ]
+
+    dropped: List[Tuple[str, float, float]] = []
+    if rating_range is not None:
+        rating_range = _normalize_rating_range(rating_range)
+        numeric_candidates, dropped = _drop_out_of_range_cols(
+            numeric_candidates, df, rating_range
+        )
+
+        if len(numeric_candidates) == n_profiles:
+            # 曖昧さが解消されたので、「右端 n 列を採用しました」の警告も、
+            # 候補から外した列の警告も出さない（正常系では黙って通す）。
+            _check_rating_values(numeric_candidates, df, rating_range, csv_path)
+            return numeric_candidates
+
+        if len(numeric_candidates) < n_profiles:
+            raise ValueError(
+                _out_of_range_columns_message(
+                    numeric_candidates, dropped, rating_range, n_profiles, csv_path
+                )
+            )
+
+        # 候補が n_profiles より多く、まだ位置で選ぶしかない。
+        # どの列を候補から外したかは、確認の手がかりになるので知らせる。
+        if dropped:
+            warnings.warn(
+                _dropped_columns_message(dropped, rating_range),
+                UserWarning,
+                stacklevel=3,
+            )
 
     if len(numeric_candidates) >= n_profiles:
         selected = numeric_candidates[-n_profiles:]
@@ -542,6 +612,8 @@ def _pick_rating_cols(
                 UserWarning,
                 stacklevel=3,
             )
+        if rating_range is not None:
+            _check_rating_values(selected, df, rating_range, csv_path)
         return selected
 
     if len(candidates) >= n_profiles:
@@ -566,6 +638,186 @@ def _pick_rating_cols(
 def _is_coercible_to_numeric(series: pd.Series) -> bool:
     """pd.to_numeric で変換できるか（NaN以外の値が1つ以上あるか）を確認する。"""
     return pd.to_numeric(series, errors="coerce").notna().any()
+
+
+# ---------------------------------------------------------------------------
+# 内部ヘルパー関数：rating_range による評点列の同定・検品
+# ---------------------------------------------------------------------------
+
+
+def _normalize_rating_range(
+    rating_range: Tuple[float, float],
+) -> Tuple[float, float]:
+    """rating_range を検査して (最小値, 最大値) の組に整える。"""
+    try:
+        low, high = rating_range
+        low, high = float(low), float(high)
+    except (TypeError, ValueError) as e:
+        raise ValueError(
+            f"rating_range は (最小値, 最大値) の2つの数値で指定してください。\n"
+            f"  受け取った値: {rating_range!r}\n"
+            "  例：1〜10 の10段階評価なら rating_range=(1, 10)"
+        ) from e
+    if low > high:
+        raise ValueError(
+            f"rating_range の最小値 ({_fmt_num(low)}) が最大値 "
+            f"({_fmt_num(high)}) より大きくなっています。\n"
+            "  (最小値, 最大値) の順で指定してください。\n"
+            "  例：1〜10 の10段階評価なら rating_range=(1, 10)"
+        )
+    return low, high
+
+
+def _numeric_values(series: pd.Series) -> pd.Series:
+    """列を数値に変換し、欠損（無回答）を除いた値を位置番号つきで返す。"""
+    values = pd.to_numeric(series, errors="coerce").reset_index(drop=True)
+    return values[values.notna()]
+
+
+def _drop_out_of_range_cols(
+    numeric_candidates: List[str],
+    df: pd.DataFrame,
+    rating_range: Tuple[float, float],
+) -> "Tuple[List[str], List[Tuple[str, float, float]]]":
+    """
+    非NaN値が **すべて** rating_range の外側である列を候補から外す。
+
+    「1つでも範囲外なら外す」ではなく「すべて範囲外なら外す」とするのは、
+    入力ミスが1つ混じっただけの正当な評点列を落とさないためである。
+    そのような列は候補に残したうえで、:func:`_check_rating_values` で
+    エラーとして知らせる。
+
+    非NaN値が0個の列は判定できないため候補に残す。
+
+    この関数は警告を出さない。除外したこと自体は問題ではなく、除外した
+    あとで曖昧さが残っているかどうかで知らせるべきかが決まるためである
+    （判断は呼び出し側の :func:`_pick_rating_cols` で行う）。
+
+    Returns
+    -------
+    (kept, dropped)
+        kept    : 候補に残した列名のリスト
+        dropped : 外した列の (列名, 実際の最小値, 実際の最大値) のリスト
+    """
+    low, high = rating_range
+    kept: List[str] = []
+    dropped: List[Tuple[str, float, float]] = []
+    for col in numeric_candidates:
+        values = _numeric_values(df[col])
+        if values.empty:
+            # 全部が欠損の列は判定できないので残す
+            kept.append(col)
+            continue
+        if ((values < low) | (values > high)).all():
+            dropped.append((col, float(values.min()), float(values.max())))
+        else:
+            kept.append(col)
+
+    return kept, dropped
+
+
+def _dropped_columns_message(
+    dropped: "List[Tuple[str, float, float]]",
+    rating_range: Tuple[float, float],
+) -> str:
+    """rating_range の外側だったため候補から外した列を知らせる警告文。"""
+    low, high = rating_range
+    detail = "\n".join(
+        f"    '{col}'（値域: {_fmt_num(lo)} 〜 {_fmt_num(hi)}）"
+        for col, lo, hi in dropped
+    )
+    return (
+        f"次の列は、値がすべて rating_range="
+        f"({_fmt_num(low)}, {_fmt_num(high)}) の外側のため、\n"
+        "評点列ではないと判断しました。\n"
+        f"{detail}\n"
+        "  評点の設問がこの中にある場合は、rating_range が実際の評点尺度と\n"
+        "  合っているか確認してください。"
+    )
+
+
+def _check_rating_values(
+    selected: List[str],
+    df: pd.DataFrame,
+    rating_range: Tuple[float, float],
+    csv_path: str,
+) -> None:
+    """
+    評点列として採用した列に rating_range の範囲外の値がないか検品する。
+
+    入力ミス（10段階評価に 99 と入っているなど）をここで止める。
+    欠損（無回答）は検品の対象外。
+    """
+    low, high = rating_range
+    problems: List[str] = []
+    for col in selected:
+        values = _numeric_values(df[col])
+        out_of_range = values[(values < low) | (values > high)]
+        if out_of_range.empty:
+            continue
+        bad_values = list(dict.fromkeys(_fmt_num(v) for v in out_of_range))
+        # respondent_id は上から数えた回答の順番（出力DataFrameのものと同じ）
+        respondent_ids = [str(i + 1) for i in out_of_range.index]
+        problems.append(
+            f"  列 '{col}'\n"
+            f"    範囲外の値: {_join_head(bad_values)}\n"
+            f"    該当する回答（respondent_id）: {_join_head(respondent_ids)}"
+        )
+
+    if problems:
+        raise ValueError(
+            "評点に rating_range の範囲外の値があります。\n"
+            + "\n".join(problems)
+            + "\n"
+            f"  rating_range に指定した範囲: {_fmt_num(low)} 〜 {_fmt_num(high)}\n"
+            "  元のファイルの該当する回答を修正するか、rating_range が実際の\n"
+            "  評点尺度と合っていない可能性があるので確認してください。\n"
+            f"  ファイル: {csv_path}"
+        )
+
+
+def _out_of_range_columns_message(
+    kept: List[str],
+    dropped: "List[Tuple[str, float, float]]",
+    rating_range: Tuple[float, float],
+    n_profiles: int,
+    csv_path: str,
+) -> str:
+    """rating_range で絞り込んだ結果、候補が足りなくなった場合のエラー文。"""
+    low, high = rating_range
+    message = (
+        f"評点列が {n_profiles} 列分見つかりませんでした。\n"
+        f"  rating_range に指定した範囲: {_fmt_num(low)} 〜 {_fmt_num(high)}\n"
+        f"  評点列とみなせた列（{len(kept)} 列）: {kept}\n"
+    )
+    if dropped:
+        detail = "\n".join(
+            f"    '{col}'（値域: {_fmt_num(lo)} 〜 {_fmt_num(hi)}）"
+            for col, lo, hi in dropped
+        )
+        message += (
+            "  次の列は、値がすべて範囲の外側だったため候補から外しました。\n"
+            f"{detail}\n"
+        )
+    return message + (
+        "  rating_range が実際の評点尺度と合っていない可能性があります。\n"
+        "  実際の評点の範囲に合わせて指定し直してください。\n"
+        "  （例：1〜10 の10段階評価なら rating_range=(1, 10)）\n"
+        f"  ファイル: {csv_path}"
+    )
+
+
+def _fmt_num(value: float) -> str:
+    """数値を表示用の文字列にする（20.0 → '20'）。"""
+    number = float(value)
+    return str(int(number)) if number.is_integer() else str(number)
+
+
+def _join_head(items: List[str], limit: int = 5) -> str:
+    """リストを表示用につなぐ。多い場合は先頭だけを示す。"""
+    if len(items) <= limit:
+        return ", ".join(items)
+    return ", ".join(items[:limit]) + f" ほか {len(items) - limit} 件"
 
 
 # ---------------------------------------------------------------------------
