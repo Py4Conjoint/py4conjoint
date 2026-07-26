@@ -27,7 +27,7 @@ import hashlib
 import math
 from dataclasses import dataclass
 from itertools import product as _itertools_product
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -639,13 +639,72 @@ def suggest_n_respondents(
         }
     )
 
-    print(
-        f"Johnson-Orme の経験則: n ≥ 500 × c / (t × a)\n"
-        f"  最大水準数 c = {c_max}, 設問数 t = {n_sets}, 代替案数 a = {n_alts}\n"
-        f"  → 必要回答者数の目安: {n_required} 人以上\n"
-        "  （サブグループ別に分析する場合はグループごとにこの人数が必要です）"
-    )
+    c_max_label, c_max_note = _describe_c_max(attributes, c_max)
+    lines = [
+        "Johnson-Orme の経験則: n ≥ 500 × c / (t × a)",
+        f"  最大水準数 c = {c_max}（{c_max_label}）, "
+        f"設問数 t = {n_sets}, 代替案数 a = {n_alts}",
+    ]
+    if c_max_note:
+        lines.append(c_max_note)
+    lines.append(f"  → 必要回答者数の目安: {n_required} 人以上")
+    lines.append("  （サブグループ別に分析する場合はグループごとにこの人数が必要です）")
+    print("\n".join(lines))
     return result
+
+
+# ---------------------------------------------------------------------------
+# 内部ヘルパー（suggest_n_respondents）
+# ---------------------------------------------------------------------------
+
+# 最大水準数を持つ属性が多いとき、要約行に名前を並べる上限
+_MAX_LISTED_ATTRS = 3
+
+
+def _describe_c_max(
+    attributes: Dict[str, List[Any]],
+    c_max: int,
+) -> "Tuple[str, Optional[str]]":
+    """
+    要約行に添える「最大水準数 c を決めている属性」の説明を作る。
+
+    どの属性が必要回答者数を決めているかが分かると、設計そのものを見直す
+    判断（価格を3水準から2水準に減らす、など）につながる。ただし同じ
+    水準数の属性が複数あるときに1つだけ名指しすると、「その属性を減らせば
+    人数が減る」と誤解される（他が同じ水準数のままなら c は変わらない）。
+    そのため、次の3つに分けて説明する。
+
+    * c = 2 …… 水準数の下限（2未満は :func:`suggest_n_respondents` の
+      入力チェックで弾かれる）なので、必ず全属性が2水準である。
+      水準数では c を下げられないことを伝える。
+    * c > 2 で同じ水準数の属性が複数 …… 名前を並べ、1つだけ減らしても
+      c は変わらないことを伝える。
+    * c > 2 で1つだけ …… その属性名を示す。
+
+    Returns
+    -------
+    (label, note)
+        label : 要約行のカッコ内に入れる文字列
+        note  : カッコの下に添える補足行（不要なら None）
+    """
+    if c_max == 2:
+        return "全属性が2水準", (
+            "    ※ 2 が水準数の下限なので、c はこれ以上下げられません。\n"
+            "       設問数 t や代替案数 a を増やせば目安人数は下がりますが、\n"
+            "       回答者1人あたりの負担が増えます。"
+        )
+
+    top = [attr for attr, lvs in attributes.items() if len(lvs) == c_max]
+    names = ", ".join(f"'{attr}'" for attr in top[:_MAX_LISTED_ATTRS])
+    if len(top) > _MAX_LISTED_ATTRS:
+        names += f" ほか{len(top) - _MAX_LISTED_ATTRS}件"
+
+    if len(top) == 1:
+        return f"属性 {names}", None
+    return f"属性 {names}", (
+        "    ※ 同じ水準数の属性が複数あります。"
+        "どれか1つだけ水準を減らしても c は変わりません。"
+    )
 
 
 # ---------------------------------------------------------------------------

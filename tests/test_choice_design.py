@@ -268,6 +268,90 @@ def test_suggest_n_respondents_uses_max_levels():
     assert res.loc["brand", "必要回答者数（目安）"] == 100
 
 
+# --- 要約行に添える「c を決めている属性」の表示 ---------------------------
+
+
+def test_suggest_n_respondents_names_the_attribute(capsys):
+    """同点がなければ、c を決めている属性を1つ名指しする（補足行は出ない）。"""
+    attrs = {
+        "price": [6, 8, 10],
+        "os": ["android", "apple"],
+        "camera": ["標準", "高性能"],
+    }
+    pcc.suggest_n_respondents(attrs, n_sets=6, n_alts=3)
+    out = capsys.readouterr().out
+    assert "最大水準数 c = 3（属性 'price'）" in out
+    assert "※" not in out
+
+
+def test_suggest_n_respondents_lists_tied_attributes(capsys):
+    """同じ水準数の属性が複数あれば、すべて並べて補足行を出す。
+
+    1つだけ名指しすると「その属性を減らせば人数が減る」と誤解されるが、
+    他が同じ水準数のままなら c は変わらないため。
+    """
+    attrs = {
+        "price": [6, 8, 10],
+        "brand": ["A社", "B社", "C社"],
+        "os": ["android", "apple"],
+    }
+    pcc.suggest_n_respondents(attrs, n_sets=6, n_alts=3)
+    out = capsys.readouterr().out
+    assert "最大水準数 c = 3（属性 'price', 'brand'）" in out
+    assert "どれか1つだけ水準を減らしても c は変わりません" in out
+
+
+def test_suggest_n_respondents_c_max_is_two(capsys):
+    """全属性が2水準（＝水準数の下限）のときは、下げられない旨と負担を示す。
+
+    2未満は入力チェックで弾かれるので、c=2 なら必ず全属性が2水準になる。
+    """
+    attrs = {
+        "price": [6, 10],
+        "os": ["android", "apple"],
+        "camera": ["標準", "高性能"],
+    }
+    pcc.suggest_n_respondents(attrs, n_sets=6, n_alts=3)
+    out = capsys.readouterr().out
+    assert "最大水準数 c = 2（全属性が2水準）" in out
+    assert "下限" in out
+    # 「t や a を増やせばよい」で終わらせない（回答負担への付け替えになる）
+    assert "回答者1人あたりの負担が増えます" in out
+
+
+def test_suggest_n_respondents_all_tied_but_not_minimum(capsys):
+    """全属性が同数でも c > 2 なら、下限の文言ではなく同点の文言になる。
+
+    分岐の境界（c == 2 かどうか）を固定する。3水準どうしの同点なら、
+    まだ水準を減らす余地があるため「下限」とは言ってはいけない。
+    """
+    attrs = {
+        "price": [6, 8, 10],
+        "os": ["android", "apple", "other"],
+        "camera": ["低", "標準", "高"],
+    }
+    pcc.suggest_n_respondents(attrs, n_sets=6, n_alts=3)
+    out = capsys.readouterr().out
+    assert "最大水準数 c = 3（属性 'price', 'os', 'camera'）" in out
+    assert "どれか1つだけ水準を減らしても c は変わりません" in out
+    assert "下限" not in out
+
+
+def test_suggest_n_respondents_dataframe_is_unchanged(capsys):
+    """要約行の変更は印字だけで、返り値の DataFrame は従来どおり。"""
+    res = pcc.suggest_n_respondents(ATTRS, n_sets=8, n_alts=3)
+    capsys.readouterr()
+    assert list(res.columns) == ["水準数", "必要回答者数（目安）"]
+    assert res.index.name == "属性"
+    assert list(res.index) == ["price", "brand"]
+    assert res["水準数"].tolist() == [3, 3]
+    assert res["必要回答者数（目安）"].tolist() == [63, 63]
+    assert res.attrs["c_max"] == 3
+    assert res.attrs["n_required"] == 63
+    assert res.attrs["n_sets"] == 8
+    assert res.attrs["n_alts"] == 3
+
+
 def test_suggest_n_respondents_errors():
     with pytest.raises(ValueError, match="attributes"):
         pcc.suggest_n_respondents({}, n_sets=8, n_alts=3)
