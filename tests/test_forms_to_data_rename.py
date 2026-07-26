@@ -10,6 +10,7 @@
   あること。
 - choice の出力列名（respondent_id, choice_set_id, choice, alt）は不変であること。
 """
+
 import sys
 from pathlib import Path
 
@@ -23,8 +24,8 @@ import py4conjoint.choice as pcc
 import py4conjoint.rating as pcr
 
 PROFILES = {
-    "price":  [6, 10, 6, 10],
-    "os":     ["android", "apple", "apple", "android"],
+    "price": [6, 10, 6, 10],
+    "os": ["android", "apple", "apple", "android"],
     "camera": ["標準", "標準", "高性能", "高性能"],
 }
 
@@ -39,7 +40,7 @@ def _make_rating_microsoft_xlsx(path, n_resp=6):
         "Name": [""] * n_resp,
     }
     for p in range(4):
-        data[f"製品案{p+1}を何点で評価しますか？"] = [
+        data[f"製品案{p + 1}を何点で評価しますか？"] = [
             ((p + r) % 7) + 1 for r in range(n_resp)
         ]
     pd.DataFrame(data).to_excel(path, index=False)
@@ -48,6 +49,7 @@ def _make_rating_microsoft_xlsx(path, n_resp=6):
 # ---------------------------------------------------------------------------
 # 関数名の統一（forms_to_data）と旧名の削除
 # ---------------------------------------------------------------------------
+
 
 def test_rating_forms_to_data_is_public():
     assert callable(pcr.forms_to_data)
@@ -75,6 +77,7 @@ def test_old_choice_function_name_removed():
 # rating: 第2引数は profiles（旧名 attributes は不可）
 # ---------------------------------------------------------------------------
 
+
 def test_rating_attributes_kwarg_rejected(tmp_path):
     f = tmp_path / "responses.xlsx"
     _make_rating_microsoft_xlsx(f)
@@ -93,6 +96,7 @@ def test_rating_profiles_kwarg_works(tmp_path):
 # ---------------------------------------------------------------------------
 # rating の出力列名は英語（respondent_id, profile_id, rating）
 # ---------------------------------------------------------------------------
+
 
 def test_rating_output_columns_are_english(tmp_path):
     f = tmp_path / "responses.xlsx"
@@ -124,10 +128,13 @@ def test_rating_fit_uses_english_default(tmp_path):
 # choice の出力列名は不変（respondent_id, choice_set_id, choice, alt）
 # ---------------------------------------------------------------------------
 
+
 def test_choice_output_columns_unchanged(tmp_path):
     design = pcc.design_choice_sets(
         {"price": [100, 150, 200], "brand": ["A社", "B社", "C社"]},
-        n_sets=4, n_alts=3, seed=42,
+        n_sets=4,
+        n_alts=3,
+        seed=42,
     )
     n = 3
     data = {
@@ -138,7 +145,7 @@ def test_choice_output_columns_unchanged(tmp_path):
         "Name": [""] * n,
     }
     for q in range(4):
-        data[f"Q{q+1}. どの製品を選びますか？"] = ["製品A", "製品B", "製品C"]
+        data[f"Q{q + 1}. どの製品を選びますか？"] = ["製品A", "製品B", "製品C"]
     f = tmp_path / "responses.xlsx"
     pd.DataFrame(data).to_excel(f, index=False)
     df = pcc.forms_to_data(str(f), design, ["A", "B", "C"])
@@ -150,13 +157,16 @@ def test_choice_output_columns_unchanged(tmp_path):
 # choice: forms_to_data → fit を引数省略で通すと既定列名が一致して動く
 # ---------------------------------------------------------------------------
 
+
 def test_choice_fit_defaults_match_forms_output(tmp_path):
     """forms_to_data() → fit() を列名引数なしで通すと、出力列名（respondent_id /
     choice_set_id）が fit() の既定と一致し、クラスタロバストSEが適用される
     （independence_assumed 警告が出ない）。"""
     design = pcc.design_choice_sets(
         {"price": [100, 150, 200], "brand": ["A社", "B社", "C社"]},
-        n_sets=4, n_alts=3, seed=42,
+        n_sets=4,
+        n_alts=3,
+        seed=42,
     )
     rng = np.random.default_rng(0)
     n_resp = 15
@@ -168,7 +178,7 @@ def test_choice_fit_defaults_match_forms_output(tmp_path):
         "Name": [""] * n_resp,
     }
     for q in range(4):
-        data[f"Q{q+1}. どの製品を選びますか？"] = list(
+        data[f"Q{q + 1}. どの製品を選びますか？"] = list(
             rng.choice(["製品A", "製品B", "製品C"], size=n_resp)
         )
     f = tmp_path / "responses.xlsx"
@@ -194,11 +204,14 @@ def test_choice_fit_defaults_match_forms_output(tmp_path):
 # choice の出力列順を rating に統一（回答者を先頭に）
 # ---------------------------------------------------------------------------
 
+
 def _make_choice_microsoft_xlsx(path, n_resp=3, n_sets=4, seed=0):
     """Microsoft Forms 形式の選択回答ファイルと対応する design を作る。"""
     design = pcc.design_choice_sets(
         {"price": [100, 150, 200], "brand": ["A社", "B社", "C社"]},
-        n_sets=n_sets, n_alts=3, seed=42,
+        n_sets=n_sets,
+        n_alts=3,
+        seed=42,
     )
     rng = np.random.default_rng(seed)
     data = {
@@ -209,7 +222,7 @@ def _make_choice_microsoft_xlsx(path, n_resp=3, n_sets=4, seed=0):
         "Name": [""] * n_resp,
     }
     for q in range(n_sets):
-        data[f"Q{q+1}. どの製品を選びますか？"] = list(
+        data[f"Q{q + 1}. どの製品を選びますか？"] = list(
             rng.choice(["製品A", "製品B", "製品C"], size=n_resp)
         )
     pd.DataFrame(data).to_excel(path, index=False)
@@ -221,9 +234,7 @@ def test_choice_output_column_order_respondent_first(tmp_path):
     f = tmp_path / "responses.xlsx"
     design = _make_choice_microsoft_xlsx(f)
     df = pcc.forms_to_data(str(f), design, ["A", "B", "C"])
-    assert list(df.columns)[:4] == [
-        "respondent_id", "choice_set_id", "alt", "choice"
-    ]
+    assert list(df.columns)[:4] == ["respondent_id", "choice_set_id", "alt", "choice"]
 
 
 def test_rating_choice_id_order_symmetry(tmp_path):
@@ -248,6 +259,7 @@ def test_rating_choice_id_order_symmetry(tmp_path):
 # ---------------------------------------------------------------------------
 # fit() の「選択セット数」表示に内訳（回答者数 × 設問数/人）を付ける
 # ---------------------------------------------------------------------------
+
 
 def test_fit_summary_shows_choice_set_breakdown(tmp_path):
     """summary() の選択セット数が「回答者数 × 設問数/人 = 総数」で表示される。"""

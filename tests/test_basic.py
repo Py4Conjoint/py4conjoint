@@ -4,6 +4,7 @@
 ``smartphone_apple_google-3attributes_demo_2.ipynb`` の処理を本パッケージで
 書き換え、結果が一致するかを確認する。
 """
+
 import sys
 from pathlib import Path
 
@@ -22,8 +23,8 @@ def make_synthetic_data(seed: int = 0, n_resp: int = 30) -> pd.DataFrame:
     rng = np.random.default_rng(seed)
     cards = pd.DataFrame(
         {
-            "price":  [6, 10, 6, 10],
-            "os":     ["android", "apple", "apple", "android"],
+            "price": [6, 10, 6, 10],
+            "os": ["android", "apple", "apple", "android"],
             "camera": ["標準", "標準", "高性能", "高性能"],
         },
         index=["P1", "P2", "P3", "P4"],
@@ -39,7 +40,9 @@ def make_synthetic_data(seed: int = 0, n_resp: int = 30) -> pd.DataFrame:
             u += 1.2 if row["camera"] == "高性能" else -1.2
             u += rng.normal(0, 0.5)
             rating = int(np.clip(round(u), 1, 7))
-            rows.append({"respondent_id": r, "profile_id": cid, "rating": rating, **row})
+            rows.append(
+                {"respondent_id": r, "profile_id": cid, "rating": rating, **row}
+            )
     return pd.DataFrame(rows)
 
 
@@ -49,8 +52,8 @@ def test_encode_binary_three_attrs():
     df_coded = pc.encode(
         df,
         reference_levels={
-            "price":  10,
-            "os":     "android",
+            "price": 10,
+            "os": "android",
             "camera": "標準",
         },
     )
@@ -70,10 +73,12 @@ def test_encode_binary_three_attrs():
 
 def test_encode_three_levels():
     """3水準の場合、K-1個のダミー列が生成される"""
-    df = pd.DataFrame({
-        "rating": [3, 5, 7, 4, 5, 6],
-        "color":  ["赤", "青", "緑", "赤", "青", "緑"],
-    })
+    df = pd.DataFrame(
+        {
+            "rating": [3, 5, 7, 4, 5, 6],
+            "color": ["赤", "青", "緑", "赤", "青", "緑"],
+        }
+    )
     out = pc.encode(df, reference_levels={"color": "赤"})
     assert "color_0" in out.columns
     assert "color_1" in out.columns
@@ -97,10 +102,12 @@ def test_encode_three_levels_keeps_nan():
     欠損が全ダミー列 0（＝全水準平均の効用）として静かに回帰に混入していた。
     2水準（map(dict)）・choice 版（pd.NA 保持）と同じ挙動に揃える。
     """
-    df = pd.DataFrame({
-        "rating": [3, 5, 7, 4],
-        "color":  ["赤", "青", "緑", np.nan],
-    })
+    df = pd.DataFrame(
+        {
+            "rating": [3, 5, 7, 4],
+            "color": ["赤", "青", "緑", np.nan],
+        }
+    )
     out = pc.encode(df, reference_levels={"color": "赤"})
     nan_rows = out[out["color"].isna()]
     assert nan_rows["color_0"].isna().all(), "欠損行の color_0 が NaN でない"
@@ -174,9 +181,9 @@ def test_market_share():
     result = pc.fit(df_coded)
     products = pd.DataFrame(
         {
-            "price_0":      [1, -1],   # 製品A: 6万円, 製品B: 10万円
-            "os_0":     [-1, 1],   # 製品A: android, 製品B: apple
-            "camera_0": [1, -1],   # 製品A: 高性能, 製品B: 標準
+            "price_0": [1, -1],  # 製品A: 6万円, 製品B: 10万円
+            "os_0": [-1, 1],  # 製品A: android, 製品B: apple
+            "camera_0": [1, -1],  # 製品A: 高性能, 製品B: 標準
         },
         index=["製品A", "製品B"],
     )
@@ -192,8 +199,8 @@ def test_diagnostics_warning_low_r2():
     df = pd.DataFrame(
         {
             "rating": rng.integers(1, 8, 50),  # 完全ランダム
-            "price":  rng.choice([6, 10], 50),
-            "os":     rng.choice(["android", "apple"], 50),
+            "price": rng.choice([6, 10], 50),
+            "os": rng.choice(["android", "apple"], 50),
         }
     )
     df_coded = pc.encode(df, reference_levels={"price": 10, "os": "android"})
@@ -229,20 +236,27 @@ def test_diagnostics_price_insignificant():
     このとき b_hat_price ≈ 0 となり p 値が大きくなることが設計上保証される。
     """
     cards_order = ["P1", "P2", "P3", "P4"]
-    price_vals  = [6, 10, 6, 10]
-    os_vals     = ["android", "apple", "apple", "android"]
+    price_vals = [6, 10, 6, 10]
+    os_vals = ["android", "apple", "apple", "android"]
     n_resp = 20
     rows = []
     for r in range(1, n_resp + 1):
-        resp_offset = float(r % 2)      # 回答者ごとの定数（price_0 ⊥ offset）
+        resp_offset = float(r % 2)  # 回答者ごとの定数（price_0 ⊥ offset）
         for i, cid in enumerate(cards_order):
-            os_effect     = 1.5 if os_vals[i] == "apple" else -1.5
-            tiny_price_ef = 0.001 * (1 if price_vals[i] == 6 else -1)  # 極小、事実上ゼロ
+            os_effect = 1.5 if os_vals[i] == "apple" else -1.5
+            tiny_price_ef = 0.001 * (
+                1 if price_vals[i] == 6 else -1
+            )  # 極小、事実上ゼロ
             rating = float(np.clip(4.0 + os_effect + resp_offset + tiny_price_ef, 1, 7))
-            rows.append({
-                "respondent_id": r, "profile_id": cid, "rating": rating,
-                "price": price_vals[i], "os": os_vals[i],
-            })
+            rows.append(
+                {
+                    "respondent_id": r,
+                    "profile_id": cid,
+                    "rating": rating,
+                    "price": price_vals[i],
+                    "os": os_vals[i],
+                }
+            )
     df = pd.DataFrame(rows)
     df_coded = pc.encode(df, reference_levels={"price": 10, "os": "android"})
     # このテストは決定的データ（回答者内の残差がゼロ）を使うため、
@@ -253,12 +267,14 @@ def test_diagnostics_price_insignificant():
 
     p_price = float(result.ols.pvalues["price_0"])
     print(f"  price p値 = {p_price:.4f}")
-    assert p_price >= 0.10, \
+    assert p_price >= 0.10, (
         f"price 係数が有意になった（p={p_price:.4f}）。データ構築を確認してください"
+    )
 
     w_df = result.warnings()
-    assert "price_insignificant" in w_df["category"].values, \
+    assert "price_insignificant" in w_df["category"].values, (
         f"price_insignificant が出ていない（p={p_price:.4f}）"
+    )
     row = w_df[w_df["category"] == "price_insignificant"].iloc[0]
     assert row["severity"] == "中"
     print("OK test_diagnostics_price_insignificant")
@@ -270,13 +286,15 @@ def test_diagnostics_wtp_extrapolation():
     rng = np.random.default_rng(7)
     n = 40
     os_vals = rng.choice(["android", "apple"], n)
-    df = pd.DataFrame({
-        "price":  rng.choice([6, 10], n),
-        "os":     os_vals,
-        # OS の効果を非常に大きく設定（係数 ≒ 4 → WTP ≒ 4/b_price × 4 ≫ レンジ4）
-        "rating": np.where(os_vals == "apple", 6, 2).astype(float)
-              + rng.normal(0, 0.3, n),
-    })
+    df = pd.DataFrame(
+        {
+            "price": rng.choice([6, 10], n),
+            "os": os_vals,
+            # OS の効果を非常に大きく設定（係数 ≒ 4 → WTP ≒ 4/b_price × 4 ≫ レンジ4）
+            "rating": np.where(os_vals == "apple", 6, 2).astype(float)
+            + rng.normal(0, 0.3, n),
+        }
+    )
     df["rating"] = df["rating"].clip(1, 7)
     df_coded = pc.encode(df, reference_levels={"price": 10, "os": "android"})
     result = pc.fit(df_coded)
@@ -286,12 +304,14 @@ def test_diagnostics_wtp_extrapolation():
     print(w_df)
 
     # 外挿警告が出ているはず（price_range=4, threshold=8, WTP >> 8 のはず）
-    assert "wtp_extrapolation" in w_df["category"].values, \
+    assert "wtp_extrapolation" in w_df["category"].values, (
         f"wtp_extrapolation 警告が出ていない。WTP:\n{wtp}"
+    )
     ext_rows = w_df[w_df["category"] == "wtp_extrapolation"]
     # wtp_extrapolation は常に「中」
-    assert ext_rows.iloc[0]["severity"] == "中", \
+    assert ext_rows.iloc[0]["severity"] == "中", (
         f"期待: 中, 実際: {ext_rows.iloc[0]['severity']}"
+    )
     print(f"  wtp_extrapolation 警告を確認（重大度={ext_rows.iloc[0]['severity']}）")
     print("OK test_diagnostics_wtp_extrapolation")
 
@@ -299,21 +319,29 @@ def test_diagnostics_wtp_extrapolation():
 def test_warnings_not_duplicated():
     """wtp()を複数回呼んでも警告が重複登録されない"""
     df = make_synthetic_data(seed=4, n_resp=30)
-    df_coded = pc.encode(df, reference_levels={"price": 10, "os": "android", "camera": "標準"})
+    df_coded = pc.encode(
+        df, reference_levels={"price": 10, "os": "android", "camera": "標準"}
+    )
     result = pc.fit(df_coded)
 
     _ = result.wtp()
-    _ = result.wtp()   # 2回目
-    _ = result.wtp()   # 3回目
+    _ = result.wtp()  # 2回目
+    _ = result.wtp()  # 3回目
 
     w_df = result.warnings(category="price_insignificant")
     # 高々1件しかないはず
     assert len(w_df) <= 1, f"price_insignificant が重複: {len(w_df)} 件"
 
-    all_cats = result.warnings()["category"].tolist() if len(result.warnings()) > 0 else []
+    all_cats = (
+        result.warnings()["category"].tolist() if len(result.warnings()) > 0 else []
+    )
     from collections import Counter
-    dupes = [k for k, v in Counter(all_cats).items() if v > 1
-             and not k.startswith("wtp_extrapolation_")]  # 属性ごとなので別カテゴリ扱い
+
+    dupes = [
+        k
+        for k, v in Counter(all_cats).items()
+        if v > 1 and not k.startswith("wtp_extrapolation_")
+    ]  # 属性ごとなので別カテゴリ扱い
     assert not dupes, f"重複した警告カテゴリ: {dupes}"
     print("OK test_warnings_not_duplicated")
 
@@ -340,6 +368,7 @@ def test_e2e_real_data():
     クラスタロバスト標準誤差がデフォルトで適用されることを確認する。
     """
     import statsmodels.formula.api as smf
+
     csv = Path(__file__).parent.parent / "examples" / "responses_os.csv"
     if not csv.exists():
         print("  responses_os.csv が見つからないためスキップ")
@@ -347,8 +376,8 @@ def test_e2e_real_data():
 
     profiles = pd.DataFrame(
         {
-            "price":  [6, 10, 6, 10],
-            "os":     ["android", "apple", "apple", "android"],
+            "price": [6, 10, 6, 10],
+            "os": ["android", "apple", "apple", "android"],
             "camera": ["標準", "標準", "高性能", "高性能"],
         },
         index=["P1", "P2", "P3", "P4"],
@@ -360,7 +389,9 @@ def test_e2e_real_data():
         profiles=profiles,
         forms="google",
     )
-    df = pc.encode(df, reference_levels={"price": 10, "os": "android", "camera": "標準"})
+    df = pc.encode(
+        df, reference_levels={"price": 10, "os": "android", "camera": "標準"}
+    )
     result = pc.fit(df)
 
     # 回答者ID列があるのでクラスタロバストSEが使われる
@@ -369,22 +400,23 @@ def test_e2e_real_data():
 
     # ノートブック方式（手動符号化 + 通常OLS）と係数が一致
     # （クラスタSEは標準誤差のみ変え、係数の推定値は変えない）
-    df_nb = pc.forms_to_data(
-        responses_file=str(csv), profiles=profiles, forms="google"
-    )
-    df_nb["price_low"]   = df_nb["price"].map({10: -1, 6: 1})
-    df_nb["os_apple"]    = df_nb["os"].map({"android": -1, "apple": 1})
+    df_nb = pc.forms_to_data(responses_file=str(csv), profiles=profiles, forms="google")
+    df_nb["price_low"] = df_nb["price"].map({10: -1, 6: 1})
+    df_nb["os_apple"] = df_nb["os"].map({"android": -1, "apple": 1})
     df_nb["camera_high"] = df_nb["camera"].map({"標準": -1, "高性能": 1})
     res_nb = smf.ols("rating ~ price_low + os_apple + camera_high", data=df_nb).fit()
 
     for nb_col, pkg_col in [
-        ("price_low", "price_0"), ("os_apple", "os_0"), ("camera_high", "camera_0")
+        ("price_low", "price_0"),
+        ("os_apple", "os_0"),
+        ("camera_high", "camera_0"),
     ]:
-        assert abs(res_nb.params[nb_col] - result.params[pkg_col]) < 1e-9, \
+        assert abs(res_nb.params[nb_col] - result.params[pkg_col]) < 1e-9, (
             f"{pkg_col} が一致しない"
+        )
 
     wtp = result.wtp()
-    apple_wtp_nb = -(6-10) / res_nb.params["price_low"] * res_nb.params["os_apple"]
+    apple_wtp_nb = -(6 - 10) / res_nb.params["price_low"] * res_nb.params["os_apple"]
     assert abs(wtp.loc["os_0", "限界支払意思額"] - apple_wtp_nb) < 1e-9
 
     # 警告の整合性チェック（データの中身に依存しない条件付き検証）
@@ -394,11 +426,13 @@ def test_e2e_real_data():
     cats = w_df["category"].values
     p_price = wtp.attrs["p_price"]
     if p_price >= 0.10:
-        assert "price_insignificant" in cats, \
+        assert "price_insignificant" in cats, (
             f"p_price={p_price:.3f} ≥ 0.10 なのに price_insignificant が出ていない"
+        )
     else:
-        assert "price_insignificant" not in cats, \
+        assert "price_insignificant" not in cats, (
             f"p_price={p_price:.3f} < 0.10 なのに price_insignificant が出た"
+        )
     threshold = wtp.attrs["price_range"] * 2
     if (wtp["限界支払意思額"].abs() > threshold).any():
         assert "wtp_extrapolation" in cats, "wtp_extrapolation が出ていない"
@@ -411,8 +445,9 @@ def test_e2e_real_data():
     major = result.warnings(severity="大")
     if len(major) > 0:
         for _, row in major.iterrows():
-            assert row["message"][:10] in s, \
+            assert row["message"][:10] in s, (
                 f"重大度「大」の警告がsummaryに出ていない: {row['message'][:20]}"
+            )
 
     print("OK test_e2e_real_data")
 
@@ -493,7 +528,9 @@ def test_price_sign_negative():
         for price, os in [(6, "android"), (10, "android"), (6, "apple"), (10, "apple")]:
             luxury_effect = 2.0 if price == 10 else -2.0
             rating = float(np.clip(4.0 + luxury_effect + rng.normal(0, 0.3), 1, 7))
-            rows.append({"respondent_id": r, "price": price, "os": os, "rating": rating})
+            rows.append(
+                {"respondent_id": r, "price": price, "os": os, "rating": rating}
+            )
     df = pd.DataFrame(rows)
     # 高い方を基準 → price_0=+1 が price=6（安い方）→ luxury では b_price < 0
     df_coded = pc.encode(df, reference_levels={"price": 10, "os": "android"})
@@ -525,6 +562,7 @@ def test_summary_slim_false():
 def test_auto_reference_levels():
     """auto_reference_levels: 数値列→最大値、カテゴリ列→辞書順先頭"""
     import warnings as _warnings
+
     df = make_synthetic_data(seed=0, n_resp=5)
     with _warnings.catch_warnings(record=True) as w:
         _warnings.simplefilter("always")
@@ -550,9 +588,9 @@ def test_market_share_max():
     result = pc.fit(df_coded)
     products = pd.DataFrame(
         {
-            "price_0":  [ 1, -1],
-            "os_0":     [ 1, -1],
-            "camera_0": [ 1, -1],
+            "price_0": [1, -1],
+            "os_0": [1, -1],
+            "camera_0": [1, -1],
         },
         index=["製品A", "製品B"],
     )
@@ -604,8 +642,12 @@ def test_encode_binary_suffix_map():
     )
     assert "price_low" in out.columns, "price_low がない"
     assert "os_apple" in out.columns, "os_apple がない"
-    assert "price_0" not in out.columns, "price_0 が残っている（カスタム名に上書きされるはず）"
-    assert "os_0" not in out.columns, "os_0 が残っている（カスタム名に上書きされるはず）"
+    assert "price_0" not in out.columns, (
+        "price_0 が残っている（カスタム名に上書きされるはず）"
+    )
+    assert "os_0" not in out.columns, (
+        "os_0 が残っている（カスタム名に上書きされるはず）"
+    )
     # binary_suffix_map 未指定の属性はデフォルト命名
     assert "camera_0" in out.columns, "camera_0 がない"
     print("OK test_encode_binary_suffix_map")
@@ -619,8 +661,9 @@ def test_importance_ratio():
     )
     result = pc.fit(df_coded)
     imp = result.importance(as_percent=False)
-    assert abs(imp["重要度"].sum() - 1.0) < 1e-6, \
+    assert abs(imp["重要度"].sum() - 1.0) < 1e-6, (
         f"合計が1.0にならない: {imp['重要度'].sum()}"
+    )
     assert (imp["重要度"] > 0).all(), "重要度が0以下の属性がある"
     print("OK test_importance_ratio")
 
@@ -633,13 +676,19 @@ def test_wtp_attrs():
     )
     result = pc.fit(df_coded)
     wtp = result.wtp()
-    for key in ("price_range", "wtp_price_factor", "p_price", "price_low", "price_high"):
+    for key in (
+        "price_range",
+        "wtp_price_factor",
+        "p_price",
+        "price_low",
+        "price_high",
+    ):
         assert key in wtp.attrs, f"attrs に '{key}' がない"
     assert wtp.attrs["price_low"] == 6
     assert wtp.attrs["price_high"] == 10
     assert abs(wtp.attrs["price_range"] - 4.0) < 1e-9
     b_price = float(result.params["price_0"])
-    expected_factor = 4.0 / b_price   # -(low-high)/b = -(6-10)/b = 4/b
+    expected_factor = 4.0 / b_price  # -(low-high)/b = -(6-10)/b = 4/b
     assert abs(wtp.attrs["wtp_price_factor"] - expected_factor) < 1e-9
     print("OK test_wtp_attrs")
 
@@ -647,10 +696,12 @@ def test_wtp_attrs():
 def test_encode_multi_with_suffix_map():
     """suffix_map で3水準のサフィックスを指定できるか"""
     # 存在しない基準水準を指定すると ValueError
-    df_bad = pd.DataFrame({
-        "rating": [5, 3, 7, 4, 6, 2],
-        "color": ["赤", "青", "緑", "赤", "青", "緑"],
-    })
+    df_bad = pd.DataFrame(
+        {
+            "rating": [5, 3, 7, 4, 6, 2],
+            "color": ["赤", "青", "緑", "赤", "青", "緑"],
+        }
+    )
     try:
         pc.encode(df_bad, reference_levels={"color": "白"})
         assert False, "ValueError が出るはず"
@@ -658,10 +709,12 @@ def test_encode_multi_with_suffix_map():
         pass
 
     # suffix_map で3水準のサフィックスを指定
-    df2 = pd.DataFrame({
-        "rating": [5, 3, 7, 4, 6, 2],
-        "color": ["赤", "青", "緑", "赤", "青", "緑"],
-    })
+    df2 = pd.DataFrame(
+        {
+            "rating": [5, 3, 7, 4, 6, 2],
+            "color": ["赤", "青", "緑", "赤", "青", "緑"],
+        }
+    )
     df2_coded = pc.encode(
         df2,
         reference_levels={"color": "赤"},
@@ -681,22 +734,30 @@ def test_encode_multi_suffix_length_mismatch():
     """suffix_map のリスト長が水準数と一致しない場合に ValueError"""
     df = pd.DataFrame({"rating": [1, 2, 3], "color": ["赤", "青", "緑"]})
     try:
-        pc.encode(df, reference_levels={"color": "赤"}, suffix_map={"color": ["only_one"]})
+        pc.encode(
+            df, reference_levels={"color": "赤"}, suffix_map={"color": ["only_one"]}
+        )
         assert False, "ValueError が出るはず"
     except ValueError as e:
-        assert "suffix_map" in str(e), f"エラーメッセージに suffix_map が含まれない: {e}"
+        assert "suffix_map" in str(e), (
+            f"エラーメッセージに suffix_map が含まれない: {e}"
+        )
     print("OK test_encode_multi_suffix_length_mismatch")
 
 
 def test_binary_suffix_map_deprecation():
     """binary_suffix_map を渡すと DeprecationWarning が出る"""
     import warnings as _warnings
+
     df = pd.DataFrame({"rating": [1, 2], "price": [6, 10]})
     with _warnings.catch_warnings(record=True) as w:
         _warnings.simplefilter("always")
-        pc.encode(df, reference_levels={"price": 10}, binary_suffix_map={"price": "low"})
-    assert any(issubclass(wi.category, DeprecationWarning) for wi in w), \
+        pc.encode(
+            df, reference_levels={"price": 10}, binary_suffix_map={"price": "low"}
+        )
+    assert any(issubclass(wi.category, DeprecationWarning) for wi in w), (
         "DeprecationWarning が出ていない"
+    )
     dep_warns = [wi for wi in w if issubclass(wi.category, DeprecationWarning)]
     assert "binary_suffix_map" in str(dep_warns[0].message)
     print("OK test_binary_suffix_map_deprecation")
@@ -704,11 +765,13 @@ def test_binary_suffix_map_deprecation():
 
 def test_check_design_basic():
     """check_design() の基本動作：完全直交デザインはバランス・相関・χ²に問題なし"""
-    profiles = pd.DataFrame({
-        "price":  [6, 10, 6, 10],
-        "os":     ["android", "apple", "apple", "android"],
-        "camera": ["標準", "標準", "高性能", "高性能"],
-    })
+    profiles = pd.DataFrame(
+        {
+            "price": [6, 10, 6, 10],
+            "os": ["android", "apple", "apple", "android"],
+            "camera": ["標準", "標準", "高性能", "高性能"],
+        }
+    )
     result = pc.check_design(profiles)
     assert isinstance(result.balance, pd.DataFrame)
     assert isinstance(result.correlation, pd.DataFrame)
@@ -732,14 +795,15 @@ def test_check_design_basic():
 
 def test_check_design_imbalanced():
     """check_design() でバランスが崩れている場合に balance_* 警告が出る"""
-    profiles = pd.DataFrame({
-        "price": [6, 6, 6, 10],   # 6が3回、10が1回（偏り大）
-        "os":    ["android", "apple", "android", "apple"],
-    })
+    profiles = pd.DataFrame(
+        {
+            "price": [6, 6, 6, 10],  # 6が3回、10が1回（偏り大）
+            "os": ["android", "apple", "android", "apple"],
+        }
+    )
     result = pc.check_design(profiles)
     cats = [d.category for d in result.diagnostics]
-    assert any("balance" in c for c in cats), \
-        f"balance 警告が出ていない。警告: {cats}"
+    assert any("balance" in c for c in cats), f"balance 警告が出ていない。警告: {cats}"
     print("OK test_check_design_imbalanced")
 
 
@@ -750,13 +814,16 @@ def test_check_design_ignores_pandas_index_column(tmp_path):
     同数の水準を持つ属性」として扱われ、パラメータ数が架空に膨らんで
     insufficient_profiles などの誤警告が大量に出ていた。
     """
-    profiles = pd.DataFrame({
-        "price":  [6, 10, 6, 10],
-        "os":     ["android", "apple", "apple", "android"],
-        "camera": ["標準", "標準", "高性能", "高性能"],
-    }, index=["P1", "P2", "P3", "P4"])
+    profiles = pd.DataFrame(
+        {
+            "price": [6, 10, 6, 10],
+            "os": ["android", "apple", "apple", "android"],
+            "camera": ["標準", "標準", "高性能", "高性能"],
+        },
+        index=["P1", "P2", "P3", "P4"],
+    )
     csv = tmp_path / "profiles.csv"
-    profiles.to_csv(csv)                      # index=False を付け忘れたケース
+    profiles.to_csv(csv)  # index=False を付け忘れたケース
     loaded = pd.read_csv(csv)
     assert "Unnamed: 0" in loaded.columns
 
@@ -779,7 +846,9 @@ def test_encode_binary_suffix_map_as_list():
 
     # 2水準属性に2要素以上のリストを渡すと ValueError
     try:
-        pc.encode(df, reference_levels={"price": 10}, suffix_map={"price": ["low", "high"]})
+        pc.encode(
+            df, reference_levels={"price": 10}, suffix_map={"price": ["low", "high"]}
+        )
         assert False, "ValueError が出るはず"
     except ValueError:
         pass
@@ -792,13 +861,21 @@ def test_wtp_three_level_price_no_extra_columns():
     n_resp = 25
     rows = []
     for r in range(1, n_resp + 1):
-        for price, os in [(6, "android"), (8, "android"), (10, "android"),
-                          (6, "apple"), (8, "apple"), (10, "apple")]:
+        for price, os in [
+            (6, "android"),
+            (8, "android"),
+            (10, "android"),
+            (6, "apple"),
+            (8, "apple"),
+            (10, "apple"),
+        ]:
             u = 4.0 + {6: 1.5, 8: 0.0, 10: -1.5}[price]
             u += 0.7 if os == "apple" else -0.7
             u += rng.normal(0, 0.3)
             rating = int(np.clip(round(u), 1, 7))
-            rows.append({"respondent_id": r, "rating": rating, "price": price, "os": os})
+            rows.append(
+                {"respondent_id": r, "rating": rating, "price": price, "os": os}
+            )
     df = pd.DataFrame(rows)
     df_coded = pc.encode(
         df,
@@ -825,14 +902,22 @@ def test_wtp_three_level_price():
     n_resp = 25
     rows = []
     for r in range(1, n_resp + 1):
-        for price, os in [(6, "android"), (8, "android"), (10, "android"),
-                          (6, "apple"), (8, "apple"), (10, "apple")]:
+        for price, os in [
+            (6, "android"),
+            (8, "android"),
+            (10, "android"),
+            (6, "apple"),
+            (8, "apple"),
+            (10, "apple"),
+        ]:
             u = 4.0
             u += {6: 1.5, 8: 0.0, 10: -1.5}[price]
             u += 0.7 if os == "apple" else -0.7
             u += rng.normal(0, 0.3)
             rating = int(np.clip(round(u), 1, 7))
-            rows.append({"respondent_id": r, "rating": rating, "price": price, "os": os})
+            rows.append(
+                {"respondent_id": r, "rating": rating, "price": price, "os": os}
+            )
     df = pd.DataFrame(rows)
     df_coded = pc.encode(
         df,
@@ -846,28 +931,31 @@ def test_wtp_three_level_price():
     assert isinstance(wtp, pd.DataFrame), "wtp() が DataFrame を返さない"
     assert "価格区間" in wtp.columns, "区間別 WTP に 価格区間 列がない"
     # apple の WTP は各区間で正のはず
-    assert (wtp["限界支払意思額"] > 0).all(), \
+    assert (wtp["限界支払意思額"] > 0).all(), (
         f"apple の区間別 WTP に負の値: {wtp['限界支払意思額'].tolist()}"
+    )
 
     # デフォルト（method='segment'）では線形近似警告は出ない
     cats = [d.category for d in result._diagnostics]
-    assert "wtp_price_linear_approx" not in cats, \
+    assert "wtp_price_linear_approx" not in cats, (
         f"segment なのに線形近似警告が出ている: {cats}"
+    )
 
     # method='linear' のときだけ線形近似1本の単一値＋警告になる
     wtp_lin = result.wtp(method="linear")
     assert "価格区間" not in wtp_lin.columns
     assert wtp_lin.loc["os_0", "限界支払意思額"] > 0
     cats2 = [d.category for d in result._diagnostics]
-    assert "wtp_price_linear_approx" in cats2, \
+    assert "wtp_price_linear_approx" in cats2, (
         f"method='linear' で線形近似警告が出ていない: {cats2}"
+    )
 
     print("OK test_wtp_three_level_price")
 
 
 ATTR_LEVELS = {
-    "price":  [6, 8, 10],
-    "os":     ["android", "apple"],
+    "price": [6, 8, 10],
+    "os": ["android", "apple"],
     "camera": ["標準", "高性能", "超高性能"],
 }
 REF_LEVELS = {"price": 10, "os": "android", "camera": "標準"}
@@ -886,8 +974,10 @@ def test_design_profiles_basic():
 
     # すべての行が完全交差の中に存在する
     full = pd.DataFrame(
-        [dict(zip(ATTR_LEVELS.keys(), c))
-         for c in __import__("itertools").product(*ATTR_LEVELS.values())]
+        [
+            dict(zip(ATTR_LEVELS.keys(), c))
+            for c in __import__("itertools").product(*ATTR_LEVELS.values())
+        ]
     )
     for _, row in profiles.iterrows():
         match = (full == row.values).all(axis=1)
@@ -906,8 +996,10 @@ def test_design_profiles_basic():
 def test_design_profiles_check_design():
     """design_profiles() の出力を check_design() に渡してもエラーが出ない"""
     profiles = pc.design_profiles(
-        ATTR_LEVELS, n_profiles=12,
-        reference_levels=REF_LEVELS, seed=42,
+        ATTR_LEVELS,
+        n_profiles=12,
+        reference_levels=REF_LEVELS,
+        seed=42,
     )
     result = pc.check_design(profiles)
     assert isinstance(result.balance, pd.DataFrame)
@@ -977,17 +1069,23 @@ def test_design_profiles_d_efficiency_better_than_random():
 
     n_profiles = 9
     profiles_opt = pc.design_profiles(
-        ATTR_LEVELS, n_profiles=n_profiles,
-        reference_levels=REF_LEVELS, n_starts=10, seed=42,
+        ATTR_LEVELS,
+        n_profiles=n_profiles,
+        reference_levels=REF_LEVELS,
+        n_starts=10,
+        seed=42,
     )
     det_opt = profiles_opt.attrs["det_xpx"]
 
     # ランダム選択を 30 回試行し、中央値と比較
     rng = np.random.default_rng(99)
     from py4conjoint.rating.design import _build_effect_matrix
+
     full = pd.DataFrame(
-        [dict(zip(ATTR_LEVELS.keys(), c))
-         for c in itertools.product(*ATTR_LEVELS.values())]
+        [
+            dict(zip(ATTR_LEVELS.keys(), c))
+            for c in itertools.product(*ATTR_LEVELS.values())
+        ]
     )
     ref = {k: v[0] for k, v in ATTR_LEVELS.items()}
     X_full = _build_effect_matrix(full, ATTR_LEVELS, ref)
@@ -1009,9 +1107,9 @@ def test_design_profiles_d_efficiency_better_than_random():
 def test_design_profiles_mixed_levels():
     """属性間で水準数が異なる場合も正しく動作する（2×3×4）"""
     attr_levels = {
-        "price":   [6, 10],                         # 2水準
-        "os":      ["android", "apple", "other"],   # 3水準
-        "quality": ["低", "中", "高", "超高"],       # 4水準
+        "price": [6, 10],  # 2水準
+        "os": ["android", "apple", "other"],  # 3水準
+        "quality": ["低", "中", "高", "超高"],  # 4水準
     }
     # p = 1+1+2+3 = 7, N = 2×3×4 = 24
     profiles = pc.design_profiles(attr_levels, n_profiles=12, seed=0)
@@ -1028,11 +1126,11 @@ def test_suggest_n_profiles_basic():
     assert "推奨 n_profiles" in result.columns
     assert "回答者数" in result.columns
     # attrs に基本統計が入っていること
-    assert result.attrs["n_params"] == 6       # 切片1 + price2 + os1 + camera2
+    assert result.attrs["n_params"] == 6  # 切片1 + price2 + os1 + camera2
     assert result.attrs["n_encoded"] == 5
     assert result.attrs["n_candidates"] == 18  # 3×2×3
-    assert result.attrs["m_min"] == 6          # = p
-    assert result.attrs["m_orme"] == 10        # = 2×5
+    assert result.attrs["m_min"] == 6  # = p
+    assert result.attrs["m_orme"] == 10  # = 2×5
     # n_respondents 省略時は複数行
     assert len(result) > 1
     print("OK test_suggest_n_profiles_basic")
@@ -1055,9 +1153,9 @@ def test_suggest_n_profiles_with_respondents():
 
 def test_suggest_n_profiles_small_respondents():
     """回答者が少ない場合は obs 条件が効いて推奨 M が大きくなる"""
-    r5  = pc.suggest_n_profiles(ATTR_LEVELS, n_respondents=5)
+    r5 = pc.suggest_n_profiles(ATTR_LEVELS, n_respondents=5)
     r50 = pc.suggest_n_profiles(ATTR_LEVELS, n_respondents=50)
-    rec5  = r5.iloc[0]["推奨 n_profiles"]
+    rec5 = r5.iloc[0]["推奨 n_profiles"]
     rec50 = r50.iloc[0]["推奨 n_profiles"]
     assert rec5 >= rec50, "回答者が少ないほど推奨Mが大きくなるか等しいはず"
     print("OK test_suggest_n_profiles_small_respondents")
@@ -1065,7 +1163,9 @@ def test_suggest_n_profiles_small_respondents():
 
 def test_design_profiles_prefix():
     """profile_id_prefix を変えるとインデックスが変わる"""
-    profiles = pc.design_profiles(ATTR_LEVELS, n_profiles=6, seed=0, profile_id_prefix="Card")
+    profiles = pc.design_profiles(
+        ATTR_LEVELS, n_profiles=6, seed=0, profile_id_prefix="Card"
+    )
     assert profiles.index.tolist() == [f"Card{i}" for i in range(1, 7)]
     print("OK test_design_profiles_prefix")
 
@@ -1084,10 +1184,15 @@ def _make_mixed_level_data(seed: int = 10, n_resp: int = 20) -> pd.DataFrame:
                     u += {"標準": -1.2, "高性能": 0.5, "超高性能": 1.2}[cam]
                     u += rng.normal(0, 0.4)
                     rating = int(np.clip(round(u), 1, 7))
-                    rows.append({
-                        "respondent_id": r, "rating": rating,
-                        "price": price, "os": os, "camera": cam,
-                    })
+                    rows.append(
+                        {
+                            "respondent_id": r,
+                            "rating": rating,
+                            "price": price,
+                            "os": os,
+                            "camera": cam,
+                        }
+                    )
     return pd.DataFrame(rows)
 
 
@@ -1103,11 +1208,13 @@ def test_importance_multi_level_non_price():
 
     imp = result.importance(as_percent=True)
     # 合計が100%
-    assert abs(imp["重要度"].sum() - 100.0) < 1e-6, \
+    assert abs(imp["重要度"].sum() - 100.0) < 1e-6, (
         f"合計が100にならない: {imp['重要度'].sum()}"
+    )
     # 3属性が揃っていること
-    assert set(imp.index) == {"price", "os", "camera"}, \
+    assert set(imp.index) == {"price", "os", "camera"}, (
         f"属性がそろっていない: {imp.index.tolist()}"
+    )
     # 各属性の重要度が正の値
     assert (imp["重要度"] > 0).all()
     print("OK test_importance_multi_level_non_price")
@@ -1149,10 +1256,12 @@ def test_cluster_robust_se_default():
     assert res_cluster.se_type == "cluster"
     assert res_plain.se_type == "nonrobust"
     # 係数の推定値は同一、標準誤差は異なる
-    assert np.allclose(res_cluster.params.values, res_plain.params.values), \
+    assert np.allclose(res_cluster.params.values, res_plain.params.values), (
         "クラスタSEで係数が変わった（標準誤差のみ変わるはず）"
-    assert not np.allclose(res_cluster.ols.bse.values, res_plain.ols.bse.values), \
+    )
+    assert not np.allclose(res_cluster.ols.bse.values, res_plain.ols.bse.values), (
         "クラスタSEと通常SEの標準誤差が同一"
+    )
     # summary に標準誤差の種別が表示される
     assert "クラスタロバスト" in res_cluster.summary()
     assert "独立性を仮定" in res_plain.summary()
@@ -1164,11 +1273,13 @@ def test_independence_assumed_warning():
     rng = np.random.default_rng(3)
     n = 40
     os_vals = rng.choice(["android", "apple"], n)
-    df = pd.DataFrame({
-        "rating": np.where(os_vals == "apple", 5.5, 2.5) + rng.normal(0, 0.5, n),
-        "price":  rng.choice([6, 10], n),
-        "os":     os_vals,
-    })
+    df = pd.DataFrame(
+        {
+            "rating": np.where(os_vals == "apple", 5.5, 2.5) + rng.normal(0, 0.5, n),
+            "price": rng.choice([6, 10], n),
+            "os": os_vals,
+        }
+    )
     df_coded = pc.encode(df, reference_levels={"price": 10, "os": "android"})
     result = pc.fit(df_coded)
     assert result.se_type == "nonrobust"
@@ -1200,8 +1311,9 @@ def test_encode_attrs_no_side_effect():
     refs1 = dict(out1.attrs["py4conjoint"]["reference_levels"])
     out2 = pc.encode(out1, reference_levels={"os": "android"})
     # out1 の attrs は変わっていないこと
-    assert out1.attrs["py4conjoint"]["reference_levels"] == refs1, \
+    assert out1.attrs["py4conjoint"]["reference_levels"] == refs1, (
         "encode() が入力側の attrs を書き換えた"
+    )
     assert "os" not in out1.attrs["py4conjoint"]["reference_levels"]
     # out2 には両方の基準水準が引き継がれていること
     assert set(out2.attrs["py4conjoint"]["reference_levels"]) == {"price", "os"}
@@ -1210,19 +1322,20 @@ def test_encode_attrs_no_side_effect():
 
 def test_detect_encoded_columns_prefix_collision():
     """属性名が別の属性名の接頭辞でも符号化列の検出が重複・誤検出しない"""
-    df = pd.DataFrame({
-        "rating": [5, 3, 6, 4, 5, 3, 6, 4],
-        "os": ["android", "apple"] * 4,
-        "os_version": ["v1", "v2", "v2", "v1"] * 2,
-    })
-    df_coded = pc.encode(
-        df, reference_levels={"os": "android", "os_version": "v1"}
+    df = pd.DataFrame(
+        {
+            "rating": [5, 3, 6, 4, 5, 3, 6, 4],
+            "os": ["android", "apple"] * 4,
+            "os_version": ["v1", "v2", "v2", "v1"] * 2,
+        }
     )
+    df_coded = pc.encode(df, reference_levels={"os": "android", "os_version": "v1"})
     result = pc.fit(df_coded)
     # "os_" が "os_version"（元の文字列列）や "os_version_0"（別属性の符号化列）に
     # 前方一致しても、重複なく2列だけ検出されること
-    assert sorted(result.encoded_columns) == ["os_0", "os_version_0"], \
+    assert sorted(result.encoded_columns) == ["os_0", "os_version_0"], (
         f"検出された列: {result.encoded_columns}"
+    )
     # importance() も属性ごとに正しくグルーピングされること
     imp = result.importance()
     assert set(imp.index) == {"os", "os_version"}
@@ -1231,14 +1344,17 @@ def test_detect_encoded_columns_prefix_collision():
 
 def test_detect_encoded_columns_fallback_excludes_01():
     """reference_levels なしの自動検出は 0/1 列（respondent_encode 出力）を含めない"""
-    df = pd.DataFrame({
-        "rating": [5, 3, 6, 4, 5, 4, 6, 3],
-        "price_0": [1, -1, 1, -1, 1, -1, 1, -1],
-        "gender_0": [0, 1, 0, 1, 1, 0, 1, 0],
-    })
+    df = pd.DataFrame(
+        {
+            "rating": [5, 3, 6, 4, 5, 4, 6, 3],
+            "price_0": [1, -1, 1, -1, 1, -1, 1, -1],
+            "gender_0": [0, 1, 0, 1, 1, 0, 1, 0],
+        }
+    )
     result = pc.fit(df)  # attrs なし → フォールバック検出
-    assert result.encoded_columns == ["price_0"], \
+    assert result.encoded_columns == ["price_0"], (
         f"0/1 列が混入した: {result.encoded_columns}"
+    )
     print("OK test_detect_encoded_columns_fallback_excludes_01")
 
 
@@ -1250,8 +1366,9 @@ def test_fit_with_formula_consistent():
     )
     result = pc.fit(df_coded, formula="rating ~ price_0 + os_0")
     # encoded_columns は formula の右辺と一致（camera_0 は含まれない）
-    assert result.encoded_columns == ["price_0", "os_0"], \
+    assert result.encoded_columns == ["price_0", "os_0"], (
         f"encoded_columns: {result.encoded_columns}"
+    )
     # importance()/wtp() が KeyError にならない
     imp = result.importance()
     assert set(imp.index) == {"price", "os"}
@@ -1265,13 +1382,25 @@ def test_wtp_p_price_three_levels_joint_f_test():
     rng = np.random.default_rng(42)
     rows = []
     for r in range(1, 26):
-        for price, os in [(6, "android"), (8, "android"), (10, "android"),
-                          (6, "apple"),   (8, "apple"),   (10, "apple")]:
+        for price, os in [
+            (6, "android"),
+            (8, "android"),
+            (10, "android"),
+            (6, "apple"),
+            (8, "apple"),
+            (10, "apple"),
+        ]:
             u = 4.0 + {6: 1.5, 8: 0.0, 10: -1.5}[price]
             u += 0.7 if os == "apple" else -0.7
             u += rng.normal(0, 0.3)
-            rows.append({"respondent_id": r, "rating": int(np.clip(round(u), 1, 7)),
-                         "price": price, "os": os})
+            rows.append(
+                {
+                    "respondent_id": r,
+                    "rating": int(np.clip(round(u), 1, 7)),
+                    "price": price,
+                    "os": os,
+                }
+            )
     df = pd.DataFrame(rows)
     df_coded = pc.encode(
         df,
@@ -1286,8 +1415,9 @@ def test_wtp_p_price_three_levels_joint_f_test():
     R[0, exog.index("price_low")] = 1.0
     R[1, exog.index("price_mid")] = 1.0
     expected = float(result.ols.f_test(R).pvalue)
-    assert abs(wtp.attrs["p_price"] - expected) < 1e-12, \
+    assert abs(wtp.attrs["p_price"] - expected) < 1e-12, (
         f"p_price={wtp.attrs['p_price']} != F検定 {expected}"
+    )
     # 価格効果が強いデータなので有意のはず
     assert wtp.attrs["p_price"] < 0.05
     print("OK test_wtp_p_price_three_levels_joint_f_test")
@@ -1310,23 +1440,27 @@ def test_wtp_multi_level_non_price_matches_definition():
     # 標準→高性能 の効用差 = b_high - (-(b_high+b_ultra)) = 2*b_high + b_ultra
     expected_high = (2 * b_high + b_ultra) * factor / 2
     expected_ultra = (b_high + 2 * b_ultra) * factor / 2
-    assert abs(wtp.loc["camera_high", "限界支払意思額"] - expected_high) < 1e-9, \
+    assert abs(wtp.loc["camera_high", "限界支払意思額"] - expected_high) < 1e-9, (
         f"camera_high: {wtp.loc['camera_high', '限界支払意思額']} != {expected_high}"
-    assert abs(wtp.loc["camera_ultra", "限界支払意思額"] - expected_ultra) < 1e-9, \
+    )
+    assert abs(wtp.loc["camera_ultra", "限界支払意思額"] - expected_ultra) < 1e-9, (
         f"camera_ultra: {wtp.loc['camera_ultra', '限界支払意思額']} != {expected_ultra}"
+    )
     # 2水準属性は従来式 factor * b と同値のまま
     b_os = float(result.params["os_0"])
     assert abs(wtp.loc["os_0", "限界支払意思額"] - factor * b_os) < 1e-9
     # データ生成の真値（標準→高性能 +1.7 効用、価格感度 0.5/万円）に近いこと
     # WTP ≈ 1.7 / 0.5 = 3.4 万円（ノイズがあるため緩めの範囲で確認）
-    assert 2.5 < wtp.loc["camera_high", "限界支払意思額"] < 4.5, \
+    assert 2.5 < wtp.loc["camera_high", "限界支払意思額"] < 4.5, (
         f"WTPが真値3.4から大きく外れている: {wtp.loc['camera_high', '限界支払意思額']}"
+    )
     print("OK test_wtp_multi_level_non_price_matches_definition")
 
 
 def test_suggest_n_profiles_max_burden_below_p():
     """max_burden < p のとき推奨値が p に引き上げられ UserWarning が出る"""
     import warnings as _warnings
+
     big = {f"a{i}": [1, 2, 3, 4] for i in range(8)}  # p = 1 + 3×8 = 25 > 20
     with _warnings.catch_warnings(record=True) as w:
         _warnings.simplefilter("always")
@@ -1335,8 +1469,9 @@ def test_suggest_n_profiles_max_burden_below_p():
     assert p == 25
     rec = result.iloc[0]["推奨 n_profiles"]
     assert rec >= p, f"推奨 n_profiles ({rec}) がパラメータ数 p ({p}) 未満（回帰不能）"
-    assert any(issubclass(wi.category, UserWarning) for wi in w), \
+    assert any(issubclass(wi.category, UserWarning) for wi in w), (
         "max_burden < p なのに UserWarning が出ていない"
+    )
     # 推奨値が design_profiles() でそのまま使えること
     profiles = pc.design_profiles(big, n_profiles=int(rec), n_starts=1, seed=0)
     assert len(profiles) == rec
@@ -1349,13 +1484,21 @@ def test_unit_rating_money_three_level_price():
     n_resp = 25
     rows = []
     for r in range(1, n_resp + 1):
-        for price, os in [(6, "android"), (8, "android"), (10, "android"),
-                          (6, "apple"),   (8, "apple"),   (10, "apple")]:
+        for price, os in [
+            (6, "android"),
+            (8, "android"),
+            (10, "android"),
+            (6, "apple"),
+            (8, "apple"),
+            (10, "apple"),
+        ]:
             u = 4.0 + {6: 1.5, 8: 0.0, 10: -1.5}[price]
             u += 0.7 if os == "apple" else -0.7
             u += rng.normal(0, 0.3)
             rating = int(np.clip(round(u), 1, 7))
-            rows.append({"respondent_id": r, "rating": rating, "price": price, "os": os})
+            rows.append(
+                {"respondent_id": r, "rating": rating, "price": price, "os": os}
+            )
     df = pd.DataFrame(rows)
     df_coded = pc.encode(
         df,
@@ -1370,7 +1513,9 @@ def test_unit_rating_money_three_level_price():
     # wtp_price_factor / 2 と等価であることを確認
     wtp = result.wtp()
     expected = wtp.attrs["wtp_price_factor"] / 2.0
-    assert abs(unit - expected) < 1e-9, f"wtp_price_factor/2 との不一致: {unit} vs {expected}"
+    assert abs(unit - expected) < 1e-9, (
+        f"wtp_price_factor/2 との不一致: {unit} vs {expected}"
+    )
     print(f"  3水準価格 unit_rating_money = {unit:.4f}")
     print("OK test_unit_rating_money_three_level_price")
 
@@ -1381,13 +1526,21 @@ def test_wtp_three_level_price_warnings_not_duplicated():
     n_resp = 25
     rows = []
     for r in range(1, n_resp + 1):
-        for price, os in [(6, "android"), (8, "android"), (10, "android"),
-                          (6, "apple"),   (8, "apple"),   (10, "apple")]:
+        for price, os in [
+            (6, "android"),
+            (8, "android"),
+            (10, "android"),
+            (6, "apple"),
+            (8, "apple"),
+            (10, "apple"),
+        ]:
             u = 4.0 + {6: 1.5, 8: 0.0, 10: -1.5}[price]
             u += 0.7 if os == "apple" else -0.7
             u += rng.normal(0, 0.3)
             rating = int(np.clip(round(u), 1, 7))
-            rows.append({"respondent_id": r, "rating": rating, "price": price, "os": os})
+            rows.append(
+                {"respondent_id": r, "rating": rating, "price": price, "os": os}
+            )
     df = pd.DataFrame(rows)
     df_coded = pc.encode(
         df,
@@ -1401,9 +1554,13 @@ def test_wtp_three_level_price_warnings_not_duplicated():
     _ = result.wtp(method="linear")
 
     from collections import Counter
+
     all_cats = [d.category for d in result._diagnostics]
-    dupes = [k for k, v in Counter(all_cats).items()
-             if v > 1 and not k.startswith("wtp_extrapolation_")]
+    dupes = [
+        k
+        for k, v in Counter(all_cats).items()
+        if v > 1 and not k.startswith("wtp_extrapolation_")
+    ]
     assert not dupes, f"重複した警告カテゴリ: {dupes}"
     # wtp_price_linear_approx は1件だけ
     approx_count = sum(1 for c in all_cats if c == "wtp_price_linear_approx")
@@ -1414,24 +1571,27 @@ def test_wtp_three_level_price_warnings_not_duplicated():
 def test_check_design_three_level_attribute():
     """3水準以上の属性を含むデザインでcheck_design()が正しく機能し、誤った相関警告が出ない"""
     # price=3水準 × os=2水準 の完全直交デザイン
-    profiles = pd.DataFrame({
-        "price": [6, 8, 10, 6, 8, 10],
-        "os":    ["android", "android", "android", "apple", "apple", "apple"],
-    })
+    profiles = pd.DataFrame(
+        {
+            "price": [6, 8, 10, 6, 8, 10],
+            "os": ["android", "android", "android", "apple", "apple", "apple"],
+        }
+    )
     result = pc.check_design(profiles)
 
     # balance: すべてCV=0 → 均等
-    assert (result.balance["CV"] == 0.0).all(), \
+    assert (result.balance["CV"] == 0.0).all(), (
         f"バランスが崩れている: {result.balance}"
+    )
 
     # 相関: 同一属性内の price__0 × price__1 ペアが誤検知されないこと
     cats = [d.category for d in result.diagnostics]
-    assert not any("correlation" in c for c in cats), \
+    assert not any("correlation" in c for c in cats), (
         f"誤った相関警告が出た（同一属性内ペアのスキップ漏れ）: {cats}"
+    )
 
     # chi2: 完全直交なので警告なし
-    assert not any("chi2" in c for c in cats), \
-        f"chi2 警告が出た: {cats}"
+    assert not any("chi2" in c for c in cats), f"chi2 警告が出た: {cats}"
 
     # balance の水準数が正しい
     assert result.balance.loc["price", "水準数"] == 3
@@ -1442,23 +1602,24 @@ def test_check_design_three_level_attribute():
 def test_check_design_correlated():
     """相関が高い（完全共線）デザインで相関警告とχ²警告が出る"""
     # price と os が常に同じ組み合わせで出現（price=低 ↔ os=android、price=高 ↔ os=apple）
-    profiles = pd.DataFrame({
-        "price": [6, 6, 10, 10],
-        "os":    ["android", "android", "apple", "apple"],
-    })
+    profiles = pd.DataFrame(
+        {
+            "price": [6, 6, 10, 10],
+            "os": ["android", "android", "apple", "apple"],
+        }
+    )
     result = pc.check_design(profiles)
     cats = [d.category for d in result.diagnostics]
 
     # 完全相関 → 相関警告（大）が出るはず
-    assert any("correlation" in c for c in cats), \
-        f"相関警告が出ていない: {cats}"
+    assert any("correlation" in c for c in cats), f"相関警告が出ていない: {cats}"
     corr_diags = [d for d in result.diagnostics if "correlation" in d.category]
-    assert corr_diags[0].severity == "大", \
+    assert corr_diags[0].severity == "大", (
         f"相関警告の重大度が「大」でない: {corr_diags[0].severity}"
+    )
 
     # χ²も高いはず → chi2警告が出るはず
-    assert any("chi2" in c for c in cats), \
-        f"chi2 警告が出ていない: {cats}"
+    assert any("chi2" in c for c in cats), f"chi2 警告が出ていない: {cats}"
     print("OK test_check_design_correlated")
 
 

@@ -11,6 +11,7 @@ plot.py
 
 すべて matplotlib で描画する。日本語フォントは自動設定を試みる。
 """
+
 from __future__ import annotations
 
 import warnings
@@ -55,6 +56,7 @@ def _ensure_japanese_font() -> None:
     ]
     try:
         from matplotlib import font_manager as fm
+
         installed = {f.name for f in fm.fontManager.ttflist}
         for name in candidates:
             if name in installed:
@@ -77,6 +79,7 @@ def _ensure_japanese_font() -> None:
 # ---------------------------------------------------------------------------
 # 公開API
 # ---------------------------------------------------------------------------
+
 
 def plot_importance(
     result: "ConjointResult",
@@ -179,24 +182,35 @@ def plot_partworth(
         bs = np.array([float(result.params[c]) for c in cols])
         # 各非基準水準
         for c, b in zip(cols, bs):
-            level = c[len(attr) + 1:] if c.startswith(f"{attr}_") else c
-            rows.append({"attribute": attr, "level": level,
-                         "partworth": float(b), "is_ref": False})
+            level = c[len(attr) + 1 :] if c.startswith(f"{attr}_") else c
+            rows.append(
+                {
+                    "attribute": attr,
+                    "level": level,
+                    "partworth": float(b),
+                    "is_ref": False,
+                }
+            )
         # 基準水準（効果コーディングでは部分効用 = −Σb の実値）
         ref_value = -float(bs.sum())
         ref_label = _reference_level_label(result, attr)
-        rows.append({"attribute": attr, "level": ref_label,
-                     "partworth": ref_value, "is_ref": True})
+        rows.append(
+            {
+                "attribute": attr,
+                "level": ref_label,
+                "partworth": ref_value,
+                "is_ref": True,
+            }
+        )
 
     df_pw = pd.DataFrame(rows)
     # 表示順：属性ごとに固める。属性内では値の小さい順
     df_pw = df_pw.sort_values(["attribute", "partworth"]).reset_index(drop=True)
-    df_pw["label"] = [
-        f"{a} = {l}" for a, l in zip(df_pw["attribute"], df_pw["level"])
-    ]
+    df_pw["label"] = [f"{a} = {l}" for a, l in zip(df_pw["attribute"], df_pw["level"])]
 
     return _draw_partworth(
-        ax, df_pw,
+        ax,
+        df_pw,
         xlabel="部分効用（評点ポイント）",
         title=title,
         show_zero_line=show_zero_line,
@@ -410,9 +424,7 @@ def _draw_wtp_grouped(
     cmap = plt.get_cmap("tab10")
 
     if ax is None:
-        fig, ax = plt.subplots(
-            figsize=(max(6, 1.4 * len(attrs) + 2), 4.5)
-        )
+        fig, ax = plt.subplots(figsize=(max(6, 1.4 * len(attrs) + 2), 4.5))
 
     # 先に全ての値を求め、ラベルのはみ出しぶんの余白量を決める。
     seg_vals = {seg: [_value(a, seg) for a in attrs] for seg in segments}
@@ -423,8 +435,11 @@ def _draw_wtp_grouped(
         vals = seg_vals[seg]
         offset = (i - (n_seg - 1) / 2.0) * bar_width
         ax.bar(
-            x + offset, vals, bar_width,
-            label=seg, color=cmap(i % 10),
+            x + offset,
+            vals,
+            bar_width,
+            label=seg,
+            color=cmap(i % 10),
         )
         if show_values:
             for xi, v in zip(x + offset, vals):
@@ -432,9 +447,13 @@ def _draw_wtp_grouped(
                 va = "bottom" if v >= 0 else "top"
                 voff = 0.03 * max_abs
                 ax.text(
-                    xi, v + (voff if v >= 0 else -voff),
+                    xi,
+                    v + (voff if v >= 0 else -voff),
                     f"{v:.1f}{price_unit or ''}",
-                    ha="center", va=va, fontsize=8, rotation=90,
+                    ha="center",
+                    va=va,
+                    fontsize=8,
+                    rotation=90,
                 )
 
     ax.axhline(0, color="gray", linewidth=0.8)
@@ -515,9 +534,14 @@ def _draw_partworth(
     ref_pos = [i for i, r in enumerate(is_ref) if r]
     if ref_pos:
         ax.scatter(
-            [values[i] for i in ref_pos], ref_pos,
-            marker="D", s=55, color=_REF_MARKER_COLOR,
-            edgecolors="white", linewidths=0.8, zorder=3,
+            [values[i] for i in ref_pos],
+            ref_pos,
+            marker="D",
+            s=55,
+            color=_REF_MARKER_COLOR,
+            edgecolors="white",
+            linewidths=0.8,
+            zorder=3,
             label="基準水準（比較の起点）",
         )
         ax.legend(loc="best", fontsize=9, framealpha=0.9)
@@ -540,11 +564,13 @@ def _draw_partworth(
 # 内部ヘルパー
 # ---------------------------------------------------------------------------
 
+
 def _group_columns(result: "ConjointResult") -> dict:
     """
     結果オブジェクトから属性 → 符号化列のマッピングを取得する。
     """
     from .analysis import _group_columns_by_attribute
+
     return _group_columns_by_attribute(
         result.encoded_columns, list(result.reference_levels.keys())
     )

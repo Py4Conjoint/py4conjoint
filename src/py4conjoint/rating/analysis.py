@@ -14,6 +14,7 @@ analysis.py
 >>> result.market_share(products)
 >>> pc.check_design(profiles)  # アンケート実施前の直交性チェック
 """
+
 from __future__ import annotations
 
 import re
@@ -73,6 +74,7 @@ class Diagnostic:
     recommendation : str
         対処方法の提案（日本語）。
     """
+
     severity: str
     category: str
     message: str
@@ -86,6 +88,7 @@ class Diagnostic:
 # ---------------------------------------------------------------------------
 # デザインチェック結果オブジェクト
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class DesignCheckResult:
@@ -105,6 +108,7 @@ class DesignCheckResult:
     diagnostics : List[Diagnostic]
         検出された問題の一覧。
     """
+
     balance: pd.DataFrame
     correlation: pd.DataFrame
     chi2: pd.DataFrame
@@ -124,8 +128,7 @@ class DesignCheckResult:
         lines.append(_df_to_string_cjk(self.chi2, index=False))
 
         diags = sorted(
-            self.diagnostics,
-            key=lambda d: SEVERITY_ORDER.get(d.severity, 99)
+            self.diagnostics, key=lambda d: SEVERITY_ORDER.get(d.severity, 99)
         )
         if diags:
             lines.append("\n【警告】")
@@ -153,8 +156,7 @@ class DesignCheckResult:
                     "recommendation": d.recommendation,
                 }
                 for d in sorted(
-                    self.diagnostics,
-                    key=lambda d: SEVERITY_ORDER.get(d.severity, 99)
+                    self.diagnostics, key=lambda d: SEVERITY_ORDER.get(d.severity, 99)
                 )
             ]
         )
@@ -166,6 +168,7 @@ class DesignCheckResult:
 # ---------------------------------------------------------------------------
 # 公開API: fit関数
 # ---------------------------------------------------------------------------
+
 
 def fit(
     df: pd.DataFrame,
@@ -348,9 +351,7 @@ def fit(
         # 一時リネームして回帰し、推定後に係数名を元に戻す。
         # こうすることで `result.params["camera_高性能"]` のように
         # 元の列名でアクセスできるようになる。
-        alias_map = {
-            c: f"__pc_var_{i}__" for i, c in enumerate(encoded_columns)
-        }
+        alias_map = {c: f"__pc_var_{i}__" for i, c in enumerate(encoded_columns)}
         rev_map = {v: k for k, v in alias_map.items()}
         rating_alias = "__pc_rating__"
         rev_map[rating_alias] = rating
@@ -359,11 +360,9 @@ def fit(
         model_cols = list(use_cols)
         if use_cluster and respondent_id_col not in model_cols:
             model_cols.append(respondent_id_col)
-        df_alias = df[model_cols].rename(
-            columns={**alias_map, rating: rating_alias}
-        )
-        formula_alias = (
-            f"{rating_alias} ~ " + " + ".join(alias_map[c] for c in encoded_columns)
+        df_alias = df[model_cols].rename(columns={**alias_map, rating: rating_alias})
+        formula_alias = f"{rating_alias} ~ " + " + ".join(
+            alias_map[c] for c in encoded_columns
         )
         model = smf.ols(formula_alias, data=df_alias)
         if use_cluster:
@@ -396,6 +395,7 @@ def fit(
 # ---------------------------------------------------------------------------
 # 公開API: check_design関数
 # ---------------------------------------------------------------------------
+
 
 def check_design(
     profiles: pd.DataFrame,
@@ -454,9 +454,9 @@ def check_design(
         )
 
     balance_df = _check_balance(profiles, attrs)
-    corr_df    = _check_correlation(profiles, attrs)
-    chi2_df    = _check_chi2(profiles, attrs)
-    diags      = _design_diagnostics(profiles, attrs, balance_df, corr_df, chi2_df)
+    corr_df = _check_correlation(profiles, attrs)
+    chi2_df = _check_chi2(profiles, attrs)
+    diags = _design_diagnostics(profiles, attrs, balance_df, corr_df, chi2_df)
 
     return DesignCheckResult(
         balance=balance_df,
@@ -469,6 +469,7 @@ def check_design(
 # ---------------------------------------------------------------------------
 # 結果オブジェクト
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class ConjointResult:
@@ -513,6 +514,7 @@ class ConjointResult:
         標準誤差の種類。``"cluster"``（回答者IDによるクラスタロバスト）
         または ``"nonrobust"``（通常のOLS標準誤差）。
     """
+
     ols: RegressionResults
     df: pd.DataFrame
     rating: str
@@ -588,11 +590,11 @@ class ConjointResult:
             else "通常（観測の独立性を仮定）"
         )
         stat_rows = [
-            ("観測数",       str(self.n_obs)),
+            ("観測数", str(self.n_obs)),
             ("説明変数の数", str(len(self.encoded_columns))),
-            ("決定係数 R²",  f"{self.rsquared:.4f}"),
+            ("決定係数 R²", f"{self.rsquared:.4f}"),
             ("自由度修正 R²", f"{self.ols.rsquared_adj:.4f}"),
-            ("標準誤差",     se_label),
+            ("標準誤差", se_label),
         ]
         if self.n_dropped > 0:
             stat_rows.append(("欠損で除外", f"{self.n_dropped} 行"))
@@ -610,16 +612,21 @@ class ConjointResult:
         lines.append(
             "  "
             + _ljust_display("変数", NAME_WIDTH)
-            + " " + _rjust_display("係数", 10)
-            + " " + _rjust_display("p値", 10)
-            + "  " + "有意性"
+            + " "
+            + _rjust_display("係数", 10)
+            + " "
+            + _rjust_display("p値", 10)
+            + "  "
+            + "有意性"
         )
         lines.append(f"  {'-' * NAME_WIDTH} {'-' * 10} {'-' * 10}  {'-' * STAR_WIDTH}")
         for name in params.index:
             coef = params[name]
             p = pvals[name]
             star = _significance_stars(p)
-            lines.append(f"  {_ljust_display(str(name), NAME_WIDTH)} {coef:>10.4f} {p:>10.4f}  {star}")
+            lines.append(
+                f"  {_ljust_display(str(name), NAME_WIDTH)} {coef:>10.4f} {p:>10.4f}  {star}"
+            )
         lines.append("")
         lines.append("  有意水準: *** p<0.001  ** p<0.01  * p<0.05  . p<0.1")
 
@@ -663,8 +670,7 @@ class ConjointResult:
         def th(txt, align="left"):
             return f'<th style="{_th}text-align:{align};">{escape(str(txt))}</th>'
 
-        p = ['<div>',
-             '<p><strong>コンジョイント分析の結果</strong></p>']
+        p = ["<div>", "<p><strong>コンジョイント分析の結果</strong></p>"]
 
         # 統計量
         se_label = (
@@ -673,62 +679,74 @@ class ConjointResult:
             else "通常（観測の独立性を仮定）"
         )
         stat_rows = [
-            ("観測数",       str(self.n_obs)),
+            ("観測数", str(self.n_obs)),
             ("説明変数の数", str(len(self.encoded_columns))),
-            ("決定係数 R²",  f"{self.rsquared:.4f}"),
+            ("決定係数 R²", f"{self.rsquared:.4f}"),
             ("自由度修正 R²", f"{self.ols.rsquared_adj:.4f}"),
-            ("標準誤差",     se_label),
+            ("標準誤差", se_label),
         ]
         if self.n_dropped > 0:
             stat_rows.append(("欠損で除外", f"{self.n_dropped} 行"))
 
         p.append(f'<table style="{_tbl}">')
         for lbl, val in stat_rows:
-            p.append(f'<tr>{td(lbl)}{td(val)}</tr>')
-        p.append('</table>')
+            p.append(f"<tr>{td(lbl)}{td(val)}</tr>")
+        p.append("</table>")
 
         # 係数テーブル
-        p.append('<p><strong>【推定された係数（部分効用 part-worth）】</strong></p>')
+        p.append("<p><strong>【推定された係数（部分効用 part-worth）】</strong></p>")
         p.append(f'<table style="{_tbl}">')
-        p.append('<tr>'
-                 + th("変数") + th("係数", "right")
-                 + th("p値", "right") + th("有意性", "right")
-                 + '</tr>')
+        p.append(
+            "<tr>"
+            + th("変数")
+            + th("係数", "right")
+            + th("p値", "right")
+            + th("有意性", "right")
+            + "</tr>"
+        )
 
         params = self.params
-        pvals  = self.ols.pvalues
+        pvals = self.ols.pvalues
         for name in params.index:
-            c    = params[name]
-            pv   = pvals[name]
+            c = params[name]
+            pv = pvals[name]
             star = _significance_stars(pv)
-            p.append('<tr>'
-                     + td(name) + td(f"{c:.4f}", "right")
-                     + td(f"{pv:.4f}", "right") + td(star, "right")
-                     + '</tr>')
-        p.append('</table>')
-        p.append('<p style="font-size:0.85em;color:#888;">'
-                 '有意水準: *** p&lt;0.001&nbsp; ** p&lt;0.01&nbsp;'
-                 ' * p&lt;0.05&nbsp; . p&lt;0.1</p>')
+            p.append(
+                "<tr>"
+                + td(name)
+                + td(f"{c:.4f}", "right")
+                + td(f"{pv:.4f}", "right")
+                + td(star, "right")
+                + "</tr>"
+            )
+        p.append("</table>")
+        p.append(
+            '<p style="font-size:0.85em;color:#888;">'
+            "有意水準: *** p&lt;0.001&nbsp; ** p&lt;0.01&nbsp;"
+            " * p&lt;0.05&nbsp; . p&lt;0.1</p>"
+        )
 
         # 重大警告
         major = [d for d in self._diagnostics if d.severity == "大"]
         minor = [d for d in self._diagnostics if d.severity != "大"]
         if major:
-            p.append('<p><strong>⚠️ 重大な注意事項</strong></p><ul>')
+            p.append("<p><strong>⚠️ 重大な注意事項</strong></p><ul>")
             for d in major:
-                p.append(f'<li><strong>[{escape(d.severity)}]</strong> '
-                         f'{escape(d.message)}<br>'
-                         f'&nbsp;&nbsp;→ {escape(d.recommendation)}</li>')
-            p.append('</ul>')
+                p.append(
+                    f"<li><strong>[{escape(d.severity)}]</strong> "
+                    f"{escape(d.message)}<br>"
+                    f"&nbsp;&nbsp;→ {escape(d.recommendation)}</li>"
+                )
+            p.append("</ul>")
         if minor:
             p.append(
                 f'<p style="font-size:0.9em;color:#888;">'
-                f'その他の注意事項が {len(minor)} 件あります。'
-                f'result.warnings() で確認できます。</p>'
+                f"その他の注意事項が {len(minor)} 件あります。"
+                f"result.warnings() で確認できます。</p>"
             )
 
-        p.append('</div>')
-        return '\n'.join(p)
+        p.append("</div>")
+        return "\n".join(p)
 
     # ---- 警告（落とし穴）の取得 -------------------------------------------
 
@@ -1094,12 +1112,14 @@ class ConjointResult:
                     bs = [float(self.params[c]) for c in cols]
                     sum_b = sum(bs)
                     for col, b in zip(cols, bs):
-                        rows.append({
-                            "variable": col,
-                            "価格区間": seg["label"],
-                            "係数": b,
-                            "限界支払意思額": (b + sum_b) * money_per_utility,
-                        })
+                        rows.append(
+                            {
+                                "variable": col,
+                                "価格区間": seg["label"],
+                                "係数": b,
+                                "限界支払意思額": (b + sum_b) * money_per_utility,
+                            }
+                        )
         else:
             # 単一値（2水準価格、または method="linear"）。
             money_per_utility = wtp_price_factor / 2.0  # 評点1点あたりの金額
@@ -1109,10 +1129,13 @@ class ConjointResult:
                 bs = [float(self.params[c]) for c in cols]
                 sum_b = sum(bs)
                 for col, b in zip(cols, bs):
-                    rows.append({
-                        "variable": col, "係数": b,
-                        "限界支払意思額": (b + sum_b) * money_per_utility,
-                    })
+                    rows.append(
+                        {
+                            "variable": col,
+                            "係数": b,
+                            "限界支払意思額": (b + sum_b) * money_per_utility,
+                        }
+                    )
 
         out = pd.DataFrame(rows).set_index("variable")
         out.index.name = "属性（符号化列名）"
@@ -1182,9 +1205,7 @@ class ConjointResult:
         """
         price_col = price_col or self.price_col
         if price_col not in self.df.columns:
-            raise ValueError(
-                f"価格列 '{price_col}' が DataFrame にありません。"
-            )
+            raise ValueError(f"価格列 '{price_col}' が DataFrame にありません。")
         price_encoded = self._find_encoded_for(price_col)
         if not price_encoded:
             raise ValueError(
@@ -1292,6 +1313,7 @@ class ConjointResult:
         matplotlib.axes.Axes
         """
         from .plot import plot_importance
+
         return plot_importance(self, **kwargs)
 
     def plot_partworth(self, **kwargs: Any) -> Any:
@@ -1300,6 +1322,7 @@ class ConjointResult:
         :func:`py4conjoint.plot.plot_partworth` へのショートカット。
         """
         from .plot import plot_partworth
+
         return plot_partworth(self, **kwargs)
 
     def plot_wtp(self, **kwargs: Any) -> Any:
@@ -1307,6 +1330,7 @@ class ConjointResult:
         WTPの棒グラフを描画する。:func:`py4conjoint.plot.plot_wtp` へのショートカット。
         """
         from .plot import plot_wtp
+
         return plot_wtp(self, **kwargs)
 
     # ---- 内部処理 ---------------------------------------------------------
@@ -1408,9 +1432,7 @@ class ConjointResult:
         n_others = len(levels) - 1
         if n_others < 1:
             return None
-        meta = (
-            self.df.attrs.get("py4conjoint", {}) if hasattr(self.df, "attrs") else {}
-        )
+        meta = self.df.attrs.get("py4conjoint", {}) if hasattr(self.df, "attrs") else {}
         suffix_map = meta.get("suffix_map") or {}
         raw = suffix_map.get(original_col)
         if raw is None:
@@ -1592,7 +1614,9 @@ class ConjointResult:
 # ---------------------------------------------------------------------------
 
 
-def _rename_result_index(res: RegressionResults, rev_map: Dict[str, str]) -> RegressionResults:
+def _rename_result_index(
+    res: RegressionResults, rev_map: Dict[str, str]
+) -> RegressionResults:
     """
     回帰結果オブジェクトの係数名（params, pvalues, bse, tvalues, conf_int, model.exog_names）
     を ``rev_map`` で置換する。
@@ -1612,9 +1636,7 @@ def _rename_result_index(res: RegressionResults, rev_map: Dict[str, str]) -> Reg
         # 一部のバージョンでは exog_names は data.xnames を参照するプロパティ
         # 個別属性として保持されている場合に備えて両方更新を試みる
         try:
-            res.model.exog_names[:] = [
-                rev_map.get(n, n) for n in res.model.exog_names
-            ]
+            res.model.exog_names[:] = [rev_map.get(n, n) for n in res.model.exog_names]
         except (TypeError, AttributeError):
             pass
     # 内生変数（被説明変数）名
@@ -1641,10 +1663,7 @@ def _significance_stars(p: float) -> str:
 
 def _display_width(s: str) -> int:
     """Wide(W)・Fullwidth(F) を2列、それ以外を1列として扱う。"""
-    return sum(
-        2 if unicodedata.east_asian_width(c) in ("W", "F") else 1
-        for c in s
-    )
+    return sum(2 if unicodedata.east_asian_width(c) in ("W", "F") else 1 for c in s)
 
 
 def _ljust_display(s: str, width: int) -> str:
@@ -1664,7 +1683,10 @@ def _df_to_string_cjk(df: pd.DataFrame, index: bool = True) -> str:
     rows_str = [[str(v) for v in row] for row in str_df.itertuples(index=False)]
 
     col_widths = [
-        max(_display_width(col), max((_display_width(r[i]) for r in rows_str), default=0))
+        max(
+            _display_width(col),
+            max((_display_width(r[i]) for r in rows_str), default=0),
+        )
         for i, col in enumerate(cols)
     ]
 
@@ -1723,10 +1745,7 @@ def _detect_encoded_columns(
             return cols
 
     # フォールバック：値の範囲で判定
-    return [
-        c for c in df.columns
-        if c != rating and _is_effect_coded_column(df[c])
-    ]
+    return [c for c in df.columns if c != rating and _is_effect_coded_column(df[c])]
 
 
 def _group_columns_by_attribute(
@@ -1765,6 +1784,7 @@ def _group_columns_by_attribute(
 # ---------------------------------------------------------------------------
 # 区間別 WTP の共通ヘルパー（rating / choice で共通利用）
 # ---------------------------------------------------------------------------
+
 
 def _format_price_level(x: float) -> str:
     """価格水準を表示用に整形する（整数なら小数点を出さない）。"""
@@ -1829,12 +1849,14 @@ def _price_segments_from_utilities(
     for lo, hi in zip(levels[:-1], levels[1:]):
         span = hi - lo
         slope = (util[hi] - util[lo]) / span if span != 0 else float("nan")
-        segs.append({
-            "low": lo,
-            "high": hi,
-            "label": f"{_format_price_level(lo)}〜{_format_price_level(hi)}",
-            "slope": slope,
-        })
+        segs.append(
+            {
+                "low": lo,
+                "high": hi,
+                "label": f"{_format_price_level(lo)}〜{_format_price_level(hi)}",
+                "slope": slope,
+            }
+        )
     return segs
 
 
@@ -1849,8 +1871,9 @@ def _select_price_segment(
     """
     for seg in segs:
         if isinstance(price_segment, (tuple, list)) and len(price_segment) == 2:
-            if (float(seg["low"]) == float(price_segment[0])
-                    and float(seg["high"]) == float(price_segment[1])):
+            if float(seg["low"]) == float(price_segment[0]) and float(
+                seg["high"]
+            ) == float(price_segment[1]):
                 return [seg]
         elif str(price_segment) == seg["label"]:
             return [seg]
@@ -1865,6 +1888,7 @@ def _select_price_segment(
 # check_design() の内部ヘルパー
 # ---------------------------------------------------------------------------
 
+
 def _check_balance(profiles: pd.DataFrame, attrs: List[str]) -> pd.DataFrame:
     """各属性の水準出現頻度と変動係数（CV）を計算する。"""
     rows = []
@@ -1878,14 +1902,16 @@ def _check_balance(profiles: pd.DataFrame, attrs: List[str]) -> pd.DataFrame:
             label = "○"
         else:
             label = "△"
-        rows.append({
-            "属性": attr,
-            "水準数": len(counts),
-            "最大出現": int(counts.max()),
-            "最小出現": int(counts.min()),
-            "CV": round(cv, 4),
-            "評価": label,
-        })
+        rows.append(
+            {
+                "属性": attr,
+                "水準数": len(counts),
+                "最大出現": int(counts.max()),
+                "最小出現": int(counts.min()),
+                "CV": round(cv, 4),
+                "評価": label,
+            }
+        )
     return pd.DataFrame(rows).set_index("属性")
 
 
@@ -1903,12 +1929,14 @@ def _check_correlation(profiles: pd.DataFrame, attrs: List[str]) -> pd.DataFrame
         ref = col.mode().iloc[0]
         others = [lv for lv in levels if lv != ref]
         for i, lv in enumerate(others):
+
             def _map(v, t=lv, r=ref):
                 if v == t:
                     return 1
                 if v == r:
                     return -1
                 return 0
+
             s = col.map(_map)
             s.name = f"{attr}__{i}" if len(others) > 1 else attr
             coded_parts.append(s)
@@ -1925,7 +1953,7 @@ def _check_chi2(profiles: pd.DataFrame, attrs: List[str]) -> pd.DataFrame:
     """
     rows = []
     for i, a1 in enumerate(attrs):
-        for a2 in attrs[i + 1:]:
+        for a2 in attrs[i + 1 :]:
             ct = pd.crosstab(profiles[a1], profiles[a2]).values.astype(float)
             row_sum = ct.sum(axis=1, keepdims=True)
             col_sum = ct.sum(axis=0, keepdims=True)
@@ -1945,14 +1973,16 @@ def _check_chi2(profiles: pd.DataFrame, attrs: List[str]) -> pd.DataFrame:
                 label = "○"
             else:
                 label = "△"
-            rows.append({
-                "属性1": a1,
-                "属性2": a2,
-                "χ²": round(chi2_val, 4),
-                "自由度": dof,
-                "χ²/自由度": round(ratio, 4),
-                "評価": label,
-            })
+            rows.append(
+                {
+                    "属性1": a1,
+                    "属性2": a2,
+                    "χ²": round(chi2_val, 4),
+                    "自由度": dof,
+                    "χ²/自由度": round(ratio, 4),
+                    "評価": label,
+                }
+            )
     return pd.DataFrame(rows)
 
 
@@ -1972,45 +2002,53 @@ def _design_diagnostics(
     for attr in attrs:
         k_params += len(profiles[attr].unique()) - 1
     if n_profiles < k_params:
-        diags.append(Diagnostic(
-            severity="大",
-            category="insufficient_profiles",
-            message=(
-                f"プロファイル数（{n_profiles}）がパラメータ数（{k_params}）より少ないため、"
-                "回帰分析が実行できません。"
-            ),
-            recommendation=(
-                f"プロファイル数を少なくとも {k_params} 以上にしてください。"
-            ),
-        ))
+        diags.append(
+            Diagnostic(
+                severity="大",
+                category="insufficient_profiles",
+                message=(
+                    f"プロファイル数（{n_profiles}）がパラメータ数（{k_params}）より少ないため、"
+                    "回帰分析が実行できません。"
+                ),
+                recommendation=(
+                    f"プロファイル数を少なくとも {k_params} 以上にしてください。"
+                ),
+            )
+        )
     elif n_profiles < k_params + 2:
-        diags.append(Diagnostic(
-            severity="中",
-            category="few_profiles",
-            message=(
-                f"プロファイル数（{n_profiles}）がパラメータ数（{k_params}）に対して"
-                "ほぼ最小限です。"
-            ),
-            recommendation="プロファイルをさらに追加すると推定の安定性が上がります。",
-        ))
+        diags.append(
+            Diagnostic(
+                severity="中",
+                category="few_profiles",
+                message=(
+                    f"プロファイル数（{n_profiles}）がパラメータ数（{k_params}）に対して"
+                    "ほぼ最小限です。"
+                ),
+                recommendation="プロファイルをさらに追加すると推定の安定性が上がります。",
+            )
+        )
 
     # バランスチェック
     for attr, row in balance_df.iterrows():
         cv = row["CV"]
         if cv > 0.3:
-            diags.append(Diagnostic(
-                severity="大",
-                category=f"balance_{attr}",
-                message=f"属性 '{attr}' の水準出現頻度が偏っています（CV={cv:.3f}）。",
-                recommendation="各水準の出現回数を均等にしてください（バランスの良いデザイン）。",
-            ))
+            diags.append(
+                Diagnostic(
+                    severity="大",
+                    category=f"balance_{attr}",
+                    message=f"属性 '{attr}' の水準出現頻度が偏っています（CV={cv:.3f}）。",
+                    recommendation="各水準の出現回数を均等にしてください（バランスの良いデザイン）。",
+                )
+            )
         elif cv > 0.15:
-            diags.append(Diagnostic(
-                severity="中",
-                category=f"balance_{attr}",
-                message=f"属性 '{attr}' の水準出現頻度にやや偏りがあります（CV={cv:.3f}）。",
-                recommendation="可能であれば各水準の出現回数を均等に近づけてください。",
-            ))
+            diags.append(
+                Diagnostic(
+                    severity="中",
+                    category=f"balance_{attr}",
+                    message=f"属性 '{attr}' の水準出現頻度にやや偏りがあります（CV={cv:.3f}）。",
+                    recommendation="可能であれば各水準の出現回数を均等に近づけてください。",
+                )
+            )
 
     # 相関チェック（同一属性の符号化列ペアはスキップ）
     if not corr_df.empty:
@@ -2023,39 +2061,45 @@ def _design_diagnostics(
                     continue
                 r = abs(float(corr_df.loc[col1, col2]))
                 if r > 0.5:
-                    diags.append(Diagnostic(
-                        severity="大",
-                        category=f"correlation_{col1}_{col2}",
-                        message=(
-                            f"'{col1}' と '{col2}' の相関が高いです（|r|={r:.3f}）。"
-                            "パラメータの独立推定が困難になります。"
-                        ),
-                        recommendation=(
-                            "プロファイルの組み合わせを見直し、"
-                            "2属性の水準が独立に出現するよう設計してください。"
-                        ),
-                    ))
+                    diags.append(
+                        Diagnostic(
+                            severity="大",
+                            category=f"correlation_{col1}_{col2}",
+                            message=(
+                                f"'{col1}' と '{col2}' の相関が高いです（|r|={r:.3f}）。"
+                                "パラメータの独立推定が困難になります。"
+                            ),
+                            recommendation=(
+                                "プロファイルの組み合わせを見直し、"
+                                "2属性の水準が独立に出現するよう設計してください。"
+                            ),
+                        )
+                    )
                 elif r > 0.3:
-                    diags.append(Diagnostic(
-                        severity="中",
-                        category=f"correlation_{col1}_{col2}",
-                        message=f"'{col1}' と '{col2}' の相関がやや高いです（|r|={r:.3f}）。",
-                        recommendation="可能であればプロファイルの組み合わせを調整してください。",
-                    ))
+                    diags.append(
+                        Diagnostic(
+                            severity="中",
+                            category=f"correlation_{col1}_{col2}",
+                            message=f"'{col1}' と '{col2}' の相関がやや高いです（|r|={r:.3f}）。",
+                            recommendation="可能であればプロファイルの組み合わせを調整してください。",
+                        )
+                    )
 
     # χ²チェック
     for _, row in chi2_df.iterrows():
         ratio = row["χ²/自由度"]
         a1, a2 = row["属性1"], row["属性2"]
         if ratio > 1.0:
-            diags.append(Diagnostic(
-                severity="中",
-                category=f"chi2_{a1}_{a2}",
-                message=(
-                    f"'{a1}' と '{a2}' のχ²/自由度={ratio:.3f} > 1.0 で、"
-                    "独立性が低い可能性があります。"
-                ),
-                recommendation="2属性の水準組み合わせが偏っていないか確認してください。",
-            ))
+            diags.append(
+                Diagnostic(
+                    severity="中",
+                    category=f"chi2_{a1}_{a2}",
+                    message=(
+                        f"'{a1}' と '{a2}' のχ²/自由度={ratio:.3f} > 1.0 で、"
+                        "独立性が低い可能性があります。"
+                    ),
+                    recommendation="2属性の水準組み合わせが偏っていないか確認してください。",
+                )
+            )
 
     return diags

@@ -42,6 +42,7 @@ from .design import _is_index_artifact_column, design_signature
 # 公開API
 # ---------------------------------------------------------------------------
 
+
 def forms_to_data(
     responses_file: str,
     design: pd.DataFrame,
@@ -294,7 +295,8 @@ def forms_to_data(
     # 各選択セットの alt_id が 1..n_alts を過不足なく網羅しているか。
     expected_alts = set(range(1, n_alts + 1))
     bad_sets = [
-        int(cid) for cid, grp in design_v.groupby("choice_set_id")
+        int(cid)
+        for cid, grp in design_v.groupby("choice_set_id")
         if set(grp["alt_id"]) != expected_alts
     ]
     if bad_sets:
@@ -385,8 +387,7 @@ def forms_to_data(
     question_cols = candidate_cols
     if len(question_cols) != n_sets:
         question_cols = [
-            c for c in candidate_cols
-            if _is_choice_question_col(raw[c], choice_labels)
+            c for c in candidate_cols if _is_choice_question_col(raw[c], choice_labels)
         ]
 
     if len(question_cols) != n_sets:
@@ -410,7 +411,7 @@ def forms_to_data(
     n_respondents = len(raw)
     respondent_ids = range(1, n_respondents + 1)
 
-    chosen: Dict[tuple, int] = {}   # (respondent_id, choice_set_id) → alt_id
+    chosen: Dict[tuple, int] = {}  # (respondent_id, choice_set_id) → alt_id
     n_unanswered = 0
     unmatched: List[str] = []
 
@@ -497,6 +498,7 @@ def forms_to_data(
 # 内部ヘルパー
 # ---------------------------------------------------------------------------
 
+
 def _is_choice_question_col(
     series: pd.Series,
     choice_labels: List[str],
@@ -512,15 +514,11 @@ def _is_choice_question_col(
     ``choice_labels`` に一致しないため ``False`` になり、設問列から除外される。
     """
     non_null = [
-        str(v).strip()
-        for v in series
-        if not pd.isna(v) and str(v).strip() != ""
+        str(v).strip() for v in series if not pd.isna(v) and str(v).strip() != ""
     ]
     if not non_null:
         return False
-    return all(
-        _match_choice_label(v, choice_labels) is not None for v in non_null
-    )
+    return all(_match_choice_label(v, choice_labels) is not None for v in non_null)
 
 
 def _match_choice_label(

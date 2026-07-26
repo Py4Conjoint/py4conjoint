@@ -11,6 +11,7 @@ calamine → openpyxl の順に試すカスケードに変更した。ここで�
 を検証する。rating / choice の両方で確認する項目は、
 pcr / pcc の対称性を担保する目的なので必ず両方書く。
 """
+
 import importlib.util
 import sys
 import warnings
@@ -70,6 +71,7 @@ def _make_ms_csv(path: Path, question_cols: dict) -> Path:
 # 1. ZIP 構造の検査で弾かれる破損（_CORRUPT_XLSX_MESSAGE）
 # ---------------------------------------------------------------------------
 
+
 def test_rating_broken_not_zip_error(broken_not_zip_xlsx):
     """rating：ZIP でない .xlsx は、破損を断定した案内で弾かれる。"""
     with pytest.raises(ValueError) as exc:
@@ -91,6 +93,7 @@ def test_choice_broken_not_zip_error(broken_not_zip_xlsx, design):
 # ---------------------------------------------------------------------------
 # 2. ZIP は正常だが中身が壊れている（_UNREADABLE_EXCEL_MESSAGE）
 # ---------------------------------------------------------------------------
+
 
 def _assert_unreadable_excel_message(msg: str) -> None:
     """_UNREADABLE_EXCEL_MESSAGE 経由であることと、内訳の中身を確認する。
@@ -135,6 +138,7 @@ def test_choice_broken_zip_ok_error(broken_zip_ok_xlsx, design):
 # 3. カスケード：先頭のエンジンが失敗しても次へ進む
 # ---------------------------------------------------------------------------
 
+
 def test_falls_back_to_openpyxl_when_calamine_raises(monkeypatch):
     """calamine が RuntimeError を投げても openpyxl で読めれば成功する。
 
@@ -166,6 +170,7 @@ def test_falls_back_to_openpyxl_when_calamine_raises(monkeypatch):
 # 4. エンジンが1つも無い場合はインストール方法を案内する
 # ---------------------------------------------------------------------------
 
+
 def test_import_error_when_no_engine_available(monkeypatch, real_xlsx):
     """全エンジンが ImportError なら、導入方法を示す ImportError を出す。"""
 
@@ -185,6 +190,7 @@ def test_import_error_when_no_engine_available(monkeypatch, real_xlsx):
 # 5. .csv 経路（推奨経路）は警告なしで通る
 # ---------------------------------------------------------------------------
 
+
 def test_rating_csv_with_microsoft_emits_no_warning(tmp_path):
     """rating：forms="microsoft" に .csv を渡しても警告は出ない。"""
     f = _make_ms_csv(
@@ -203,8 +209,10 @@ def test_choice_csv_with_microsoft_emits_no_warning(tmp_path, design):
     n_sets = design["choice_set_id"].nunique()
     f = _make_ms_csv(
         tmp_path / "responses.csv",
-        {f"Q{i + 1}. どの製品を選びますか？": ["製品A", "製品B", "製品C"]
-         for i in range(n_sets)},
+        {
+            f"Q{i + 1}. どの製品を選びますか？": ["製品A", "製品B", "製品C"]
+            for i in range(n_sets)
+        },
     )
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
@@ -217,6 +225,7 @@ def test_choice_csv_with_microsoft_emits_no_warning(tmp_path, design):
 # 6. エンジン間で読み取り結果が一致する
 #    （test_choice_forms_real.py から移動）
 # ---------------------------------------------------------------------------
+
 
 def _normalize_newlines(df: pd.DataFrame) -> pd.DataFrame:
     """セル内改行を CRLF から LF に揃える（列名・値の両方）。

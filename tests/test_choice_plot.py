@@ -2,6 +2,7 @@
 
 例外なく描画でき、Axes が返り、日本語ラベルが設定されることを確認する。
 """
+
 import sys
 from pathlib import Path
 
@@ -22,6 +23,7 @@ import py4conjoint.choice as pcc
 # フィクスチャ：小規模な人工データの推定結果
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(scope="module")
 def result():
     """価格 + 3水準ブランドの小さな選択データを推定した結果を返す。"""
@@ -33,13 +35,16 @@ def result():
     u = v + rng.gumbel(size=(n_sets, n_alts))
     chosen = u.argmax(axis=1)
 
-    df = pd.DataFrame({
-        "選択セットID": np.repeat(np.arange(n_sets), n_alts),
-        "choice": (np.tile(np.arange(n_alts), n_sets)
-                   == np.repeat(chosen, n_alts)).astype(int),
-        "price": price.ravel(),
-        "brand": brand.ravel(),
-    })
+    df = pd.DataFrame(
+        {
+            "選択セットID": np.repeat(np.arange(n_sets), n_alts),
+            "choice": (
+                np.tile(np.arange(n_alts), n_sets) == np.repeat(chosen, n_alts)
+            ).astype(int),
+            "price": price.ravel(),
+            "brand": brand.ravel(),
+        }
+    )
     df_coded = pcc.encode(df, reference_levels={"brand": "A"})
     return pcc.fit(df_coded, choice="choice", choice_set_id_col="選択セットID")
 
@@ -53,6 +58,7 @@ def _close_figures():
 # ---------------------------------------------------------------------------
 # スモークテスト
 # ---------------------------------------------------------------------------
+
 
 def test_plot_importance_smoke(result):
     ax = result.plot_importance()
@@ -86,12 +92,10 @@ def test_plot_partworth_reference_marker(result):
     assert legend is not None
     assert any("基準水準" in t.get_text() for t in legend.get_texts())
     # 0 を示す点線の基準線がある
-    assert any(
-        line.get_linestyle() in (":", "dotted") for line in ax.lines
-    )
+    assert any(line.get_linestyle() in (":", "dotted") for line in ax.lines)
     # 基準水準（brand_A）のマーカーは x=0 の位置にある（ダミーコーディング）
     offsets = ax.collections[0].get_offsets()
-    assert offsets.shape[0] == 1            # 基準は brand の1つだけ
+    assert offsets.shape[0] == 1  # 基準は brand の1つだけ
     assert abs(float(offsets[0][0])) < 1e-9  # x 座標 = 0
 
 

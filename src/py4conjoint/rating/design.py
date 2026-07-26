@@ -15,6 +15,7 @@ M 個のプロファイルを選ぶ。
 ... )
 >>> pc.check_design(profiles)
 """
+
 from __future__ import annotations
 
 import math
@@ -29,6 +30,7 @@ import pandas as pd
 # ---------------------------------------------------------------------------
 # 公開 API
 # ---------------------------------------------------------------------------
+
 
 def design_profiles(
     attribute_levels: Dict[str, List[Any]],
@@ -203,7 +205,7 @@ def design_profiles(
     # 完全交差をそのまま返す場合
     if n_profiles == N:
         out = df_full.copy()
-        out.index = [f"{profile_id_prefix}{i+1}" for i in range(N)]
+        out.index = [f"{profile_id_prefix}{i + 1}" for i in range(N)]
         out.attrs["d_efficiency"] = 1.0
         out.attrs["n_candidates"] = N
         X_full = _build_effect_matrix(df_full, attribute_levels, ref_lvls)
@@ -230,7 +232,7 @@ def design_profiles(
     # 結果の整形（行インデックス順でソート）
     sorted_idx = sorted(best_indices)
     out = df_full.iloc[sorted_idx].copy()
-    out.index = [f"{profile_id_prefix}{i+1}" for i in range(n_profiles)]
+    out.index = [f"{profile_id_prefix}{i + 1}" for i in range(n_profiles)]
     out.index.name = None
 
     # D 相対効率: (det(X_sel'X_sel) / det(X_full'X_full))^(1/p)
@@ -251,6 +253,7 @@ def design_profiles(
 # ---------------------------------------------------------------------------
 # 公開 API: suggest_n_profiles 関数
 # ---------------------------------------------------------------------------
+
 
 def suggest_n_profiles(
     attribute_levels: Dict[str, List[Any]],
@@ -396,8 +399,7 @@ def suggest_n_profiles(
         )
 
     resp_list = (
-        [n_respondents] if n_respondents is not None
-        else [5, 10, 20, 30, 50, 100]
+        [n_respondents] if n_respondents is not None else [5, 10, 20, 30, 50, 100]
     )
 
     rows = []
@@ -413,29 +415,36 @@ def suggest_n_profiles(
             round(actual_obs / n_encoded, 1) if n_encoded > 0 else float("inf")
         )
 
-        rows.append({
-            "回答者数": n_resp,
-            # obs/pred 条件と統計的最低限の両方を満たす最小 M
-            f"obs/pred≥{obs_per_predictor}（最低限）": min(max(m_obs_only, m_min), N),
-            "推奨 n_profiles": m_rec,
-            "obs/pred（達成）": actual_ratio,
-            "観測数 obs": actual_obs,
-        })
+        rows.append(
+            {
+                "回答者数": n_resp,
+                # obs/pred 条件と統計的最低限の両方を満たす最小 M
+                f"obs/pred≥{obs_per_predictor}（最低限）": min(
+                    max(m_obs_only, m_min), N
+                ),
+                "推奨 n_profiles": m_rec,
+                "obs/pred（達成）": actual_ratio,
+                "観測数 obs": actual_obs,
+            }
+        )
 
     result = pd.DataFrame(rows)
-    result.attrs.update({
-        "n_params": p,
-        "n_encoded": n_encoded,
-        "n_candidates": N,
-        "m_min": m_min,
-        "m_orme": min(m_orme, N),
-    })
+    result.attrs.update(
+        {
+            "n_params": p,
+            "n_encoded": n_encoded,
+            "n_candidates": N,
+            "m_min": m_min,
+            "m_orme": min(m_orme, N),
+        }
+    )
     return result
 
 
 # ---------------------------------------------------------------------------
 # 内部ヘルパー
 # ---------------------------------------------------------------------------
+
 
 def _build_effect_matrix(
     df: pd.DataFrame,
@@ -455,8 +464,7 @@ def _build_effect_matrix(
         non_ref = [lv for lv in levels if lv != ref]
         for lv in non_ref:
             col = np.array(
-                [1.0 if v == lv else (-1.0 if v == ref else 0.0)
-                 for v in df[attr]],
+                [1.0 if v == lv else (-1.0 if v == ref else 0.0) for v in df[attr]],
                 dtype=float,
             )
             cols.append(col)
@@ -495,7 +503,7 @@ def _d_exchange_run(
     while improved:
         improved = False
 
-        X_sel_arr = X_full[sel]      # shape (M, p)
+        X_sel_arr = X_full[sel]  # shape (M, p)
         X_not_arr = X_full[not_sel]  # shape (N-M, p)
         XtX = X_sel_arr.T @ X_sel_arr
 
@@ -520,10 +528,10 @@ def _d_exchange_run(
             d_i = d_sel[i_pos]
             # c_ij = x_j' (XtX_inv x_i) を N-M 個まとめて計算
             XtX_inv_xi = XtX_inv @ X_sel_arr[i_pos]  # (p,)
-            c_all = X_not_arr @ XtX_inv_xi            # (N-M,)
+            c_all = X_not_arr @ XtX_inv_xi  # (N-M,)
 
             # 交換後の行列式比
-            ratios = (1.0 - d_i) * (1.0 + d_not) + c_all ** 2
+            ratios = (1.0 - d_i) * (1.0 + d_not) + c_all**2
             j_best = int(np.argmax(ratios))
 
             if ratios[j_best] > best_ratio:

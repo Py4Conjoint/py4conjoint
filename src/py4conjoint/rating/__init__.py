@@ -3,6 +3,7 @@ py4conjoint.rating
 ==================
 評点型コンジョイント分析のサブパッケージ。
 """
+
 from __future__ import annotations
 
 # バージョン（親パッケージと共通）

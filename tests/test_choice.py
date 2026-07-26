@@ -5,6 +5,7 @@
 (c) 外部検証: R の logitr による yogurt データの推定結果との一致
     （参照値・許容誤差は tests/data/logitr_yogurt_reference.py で定義）
 """
+
 import sys
 from pathlib import Path
 
@@ -41,27 +42,32 @@ def _simulate_choice_data(n_sets=100_000, n_alts=3, seed=42) -> pd.DataFrame:
     p = np.exp(v - v.max(axis=1, keepdims=True))
     p /= p.sum(axis=1, keepdims=True)
     chosen = (rng.random((n_sets, 1)) < p.cumsum(axis=1)).argmax(axis=1)
-    return pd.DataFrame({
-        "選択セットID": np.repeat(np.arange(n_sets), n_alts),
-        "choice": (
-            np.tile(np.arange(n_alts), n_sets) == np.repeat(chosen, n_alts)
-        ).astype(int),
-        "price": price.ravel(),
-        "brand": brand.ravel(),
-    })
+    return pd.DataFrame(
+        {
+            "選択セットID": np.repeat(np.arange(n_sets), n_alts),
+            "choice": (
+                np.tile(np.arange(n_alts), n_sets) == np.repeat(chosen, n_alts)
+            ).astype(int),
+            "price": price.ravel(),
+            "brand": brand.ravel(),
+        }
+    )
 
 
 # ---------------------------------------------------------------------------
 # encode()（ダミーコーディング）
 # ---------------------------------------------------------------------------
 
+
 def test_encode_dummy_coding():
     """encode() は 0/1 のダミーコーディングを行い、基準水準は全列 0 になる"""
-    df = pd.DataFrame({
-        "選択セットID": [1, 1, 1, 2, 2, 2],
-        "choice": [1, 0, 0, 0, 1, 0],
-        "brand": ["A", "B", "C", "B", "A", "C"],
-    })
+    df = pd.DataFrame(
+        {
+            "選択セットID": [1, 1, 1, 2, 2, 2],
+            "choice": [1, 0, 0, 0, 1, 0],
+            "brand": ["A", "B", "C", "B", "A", "C"],
+        }
+    )
     out = pcc.encode(df, reference_levels={"brand": "A"})
     assert "brand_B" in out.columns and "brand_C" in out.columns
     # 基準水準 A の行はすべて 0
@@ -89,8 +95,7 @@ def test_encode_errors():
     with pytest.raises(ValueError, match="DataFrame にありません"):
         pcc.encode(df, reference_levels={"no_such": "A"})
     with pytest.raises(ValueError, match="水準が1つ"):
-        pcc.encode(pd.DataFrame({"brand": ["A", "A"]}),
-                   reference_levels={"brand": "A"})
+        pcc.encode(pd.DataFrame({"brand": ["A", "A"]}), reference_levels={"brand": "A"})
     with pytest.raises(ValueError, match="reference_levels"):
         pcc.encode(df, reference_levels={})
     print("OK test_encode_errors")
@@ -99,6 +104,7 @@ def test_encode_errors():
 # ---------------------------------------------------------------------------
 # (a) 人工データでの真値回復
 # ---------------------------------------------------------------------------
+
 
 def test_synthetic_recovery():
     """人工データから真の係数を許容誤差 1e-2 程度で回復できる"""
@@ -110,8 +116,9 @@ def test_synthetic_recovery():
     # encoded_columns は encode() のメタ情報 + price から自動検出される
     assert result.encoded_columns == ["price", "brand_B", "brand_C"]
     for name, true_val in TRUE_BETA.items():
-        assert abs(result.params[name] - true_val) < 1.5e-2, \
+        assert abs(result.params[name] - true_val) < 1.5e-2, (
             f"{name}: 推定値 {result.params[name]:.4f} が真値 {true_val} から乖離"
+        )
     print("OK test_synthetic_recovery")
 
 
@@ -147,11 +154,14 @@ def test_synthetic_api_consistency():
     assert np.isclose(w.loc["brand_B", "限界支払意思額"], expected)
 
     # market_share：合計1の Series
-    products = pd.DataFrame({
-        "price":   [2.0, 4.0],
-        "brand_B": [1, 0],
-        "brand_C": [0, 1],
-    }, index=["製品X", "製品Y"])
+    products = pd.DataFrame(
+        {
+            "price": [2.0, 4.0],
+            "brand_B": [1, 0],
+            "brand_C": [0, 1],
+        },
+        index=["製品X", "製品Y"],
+    )
     share = result.market_share(products)
     assert isinstance(share, pd.Series)
     assert abs(share.sum() - 1.0) < 1e-12
@@ -161,8 +171,7 @@ def test_synthetic_api_consistency():
 
     # warnings：rating 版と同じ列構成の DataFrame
     w_df = result.warnings()
-    assert list(w_df.columns) == ["severity", "category", "message",
-                                  "recommendation"]
+    assert list(w_df.columns) == ["severity", "category", "message", "recommendation"]
     print("OK test_synthetic_api_consistency")
 
 
@@ -170,17 +179,22 @@ def test_synthetic_api_consistency():
 # (b) 完全分離データでの警告
 # ---------------------------------------------------------------------------
 
+
 def test_separation_warning():
     """完全分離データでは separation 警告（重大度：大）が出る"""
     n_sets = 40
     # 選ばれた代替案は常に x=1、選ばれなかった代替案は常に x=0 → 完全分離
-    df = pd.DataFrame({
-        "選択セットID": np.repeat(np.arange(n_sets), 2),
-        "choice": np.tile([1, 0], n_sets),
-        "x": np.tile([1.0, 0.0], n_sets),
-    })
+    df = pd.DataFrame(
+        {
+            "選択セットID": np.repeat(np.arange(n_sets), 2),
+            "choice": np.tile([1, 0], n_sets),
+            "x": np.tile([1.0, 0.0], n_sets),
+        }
+    )
     result = pcc.fit(
-        df, choice="choice", choice_set_id_col="選択セットID",
+        df,
+        choice="choice",
+        choice_set_id_col="選択セットID",
         encoded_columns=["x"],
     )
     sep = result.warnings(category="separation")
@@ -196,6 +210,7 @@ def test_separation_warning():
 # (c) 外部検証：R の logitr による yogurt データの推定結果と一致
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(scope="module")
 def yogurt_result():
     df = pd.read_csv(DATA_DIR / "yogurt.csv")
@@ -209,8 +224,13 @@ def yogurt_result():
         df_coded,
         choice="choice",
         choice_set_id_col="choice_set_id",
-        encoded_columns=["price", "feat", "brand_hiland", "brand_weight",
-                         "brand_yoplait"],
+        encoded_columns=[
+            "price",
+            "feat",
+            "brand_hiland",
+            "brand_weight",
+            "brand_yoplait",
+        ],
     )
 
 
@@ -231,8 +251,9 @@ def test_yogurt_coefficients_match_logitr(yogurt_result):
     for logitr_name, our_name in _NAME_MAP.items():
         est = yogurt_result.params[our_name]
         expected = ref.COEF[logitr_name]
-        assert est == pytest.approx(expected, rel=ref.RTOL_COEF), \
+        assert est == pytest.approx(expected, rel=ref.RTOL_COEF), (
             f"{our_name}: {est:.6f} != logitr {expected:.6f}"
+        )
     print("OK test_yogurt_coefficients_match_logitr")
 
 
@@ -242,17 +263,18 @@ def test_yogurt_std_errors_match_logitr(yogurt_result):
     for logitr_name, our_name in _NAME_MAP.items():
         est = yogurt_result.bse[our_name]
         expected = ref.STD_ERR[logitr_name]
-        assert est == pytest.approx(expected, rel=ref.RTOL_SE), \
+        assert est == pytest.approx(expected, rel=ref.RTOL_SE), (
             f"{our_name}: SE {est:.6f} != logitr {expected:.6f}"
+        )
     print("OK test_yogurt_std_errors_match_logitr")
 
 
 def test_yogurt_loglik_match_logitr(yogurt_result):
     """対数尤度・帰無対数尤度が logitr の参照値と一致する（atol=ATOL_LL）"""
-    assert yogurt_result.loglik == pytest.approx(ref.LOG_LIKELIHOOD,
-                                                 abs=ref.ATOL_LL)
-    assert yogurt_result.null_loglik == pytest.approx(ref.NULL_LOG_LIKELIHOOD,
-                                                      abs=ref.ATOL_LL)
+    assert yogurt_result.loglik == pytest.approx(ref.LOG_LIKELIHOOD, abs=ref.ATOL_LL)
+    assert yogurt_result.null_loglik == pytest.approx(
+        ref.NULL_LOG_LIKELIHOOD, abs=ref.ATOL_LL
+    )
     print("OK test_yogurt_loglik_match_logitr")
 
 
@@ -264,14 +286,21 @@ def test_yogurt_cluster_se():
     df_coded = pcc.encode(df, reference_levels={"brand": ref.REFERENCE_LEVEL})
     cols = ["price", "feat", "brand_hiland", "brand_weight", "brand_yoplait"]
     result = pcc.fit(
-        df_coded, choice="choice", choice_set_id_col="choice_set_id",
-        encoded_columns=cols, respondent_id_col="id",
+        df_coded,
+        choice="choice",
+        choice_set_id_col="choice_set_id",
+        encoded_columns=cols,
+        respondent_id_col="id",
     )
     assert result.se_type == "cluster"
     # 係数はクラスタリングの有無で変わらない
     nonrobust = pcc.fit(
-        df_coded, choice="choice", choice_set_id_col="choice_set_id",
-        encoded_columns=cols, cluster_se=False, respondent_id_col="id",
+        df_coded,
+        choice="choice",
+        choice_set_id_col="choice_set_id",
+        encoded_columns=cols,
+        cluster_se=False,
+        respondent_id_col="id",
     )
     assert np.allclose(result.params.to_numpy(), nonrobust.params.to_numpy())
     # 標準誤差は変わる（同一回答者の繰り返し選択があるため通常は大きくなる）
@@ -283,6 +312,7 @@ def test_yogurt_cluster_se():
 # ---------------------------------------------------------------------------
 # CBC固有の警告カテゴリ
 # ---------------------------------------------------------------------------
+
 
 def test_few_choice_sets_warning():
     """選択セット数が説明変数数の5倍未満なら few_choice_sets（大）が出る"""
@@ -306,14 +336,17 @@ def test_unbalanced_choices_warning():
     for t in range(n_sets):
         chosen_pos = 0 if first[t] else 1
         for j in range(2):
-            rows.append({
-                "選択セットID": t,
-                "choice": int(j == chosen_pos),
-                "x": float(rng.random()),
-            })
+            rows.append(
+                {
+                    "選択セットID": t,
+                    "choice": int(j == chosen_pos),
+                    "x": float(rng.random()),
+                }
+            )
     df = pd.DataFrame(rows)
-    result = pcc.fit(df, choice="choice", choice_set_id_col="選択セットID",
-                     encoded_columns=["x"])
+    result = pcc.fit(
+        df, choice="choice", choice_set_id_col="選択セットID", encoded_columns=["x"]
+    )
     w = result.warnings(category="unbalanced_choices")
     assert len(w) == 1
     assert "代替案" in w.iloc[0]["message"]
@@ -324,47 +357,71 @@ def test_unbalanced_choices_warning():
 # 入力検証（日本語エラー）
 # ---------------------------------------------------------------------------
 
+
 def test_fit_validation_errors():
     """fit() の入力チェック（選択セット構造の検証を含む）"""
-    base = pd.DataFrame({
-        "選択セットID": [1, 1, 2, 2],
-        "choice": [1, 0, 0, 1],
-        "x": [1.0, 0.0, 0.5, 0.2],
-    })
+    base = pd.DataFrame(
+        {
+            "選択セットID": [1, 1, 2, 2],
+            "choice": [1, 0, 0, 1],
+            "x": [1.0, 0.0, 0.5, 0.2],
+        }
+    )
 
     # choice 列がない
     with pytest.raises(ValueError, match="choice"):
-        pcc.fit(base.drop(columns=["choice"]), choice="choice",
-                choice_set_id_col="選択セットID", encoded_columns=["x"])
+        pcc.fit(
+            base.drop(columns=["choice"]),
+            choice="choice",
+            choice_set_id_col="選択セットID",
+            encoded_columns=["x"],
+        )
 
     # choice 列が 0/1 でない
     bad = base.copy()
     bad["choice"] = [1, 2, 0, 1]
     with pytest.raises(ValueError, match="0/1"):
-        pcc.fit(bad, choice="choice", choice_set_id_col="選択セットID",
-                encoded_columns=["x"])
+        pcc.fit(
+            bad,
+            choice="choice",
+            choice_set_id_col="選択セットID",
+            encoded_columns=["x"],
+        )
 
     # 選択がちょうど1つでない選択セット
     bad2 = base.copy()
     bad2["choice"] = [1, 1, 0, 1]
     with pytest.raises(ValueError, match="ちょうど1つ"):
-        pcc.fit(bad2, choice="choice", choice_set_id_col="選択セットID",
-                encoded_columns=["x"])
+        pcc.fit(
+            bad2,
+            choice="choice",
+            choice_set_id_col="選択セットID",
+            encoded_columns=["x"],
+        )
 
     # 代替案が1つしかない選択セット
-    bad3 = pd.DataFrame({
-        "選択セットID": [1, 1, 2],
-        "choice": [1, 0, 1],
-        "x": [1.0, 0.0, 0.5],
-    })
+    bad3 = pd.DataFrame(
+        {
+            "選択セットID": [1, 1, 2],
+            "choice": [1, 0, 1],
+            "x": [1.0, 0.0, 0.5],
+        }
+    )
     with pytest.raises(ValueError, match="代替案が1つ"):
-        pcc.fit(bad3, choice="choice", choice_set_id_col="選択セットID",
-                encoded_columns=["x"])
+        pcc.fit(
+            bad3,
+            choice="choice",
+            choice_set_id_col="選択セットID",
+            encoded_columns=["x"],
+        )
 
     # 説明変数が見つからない（encode() 未実施・encoded_columns 未指定）
     with pytest.raises(ValueError, match="説明変数が見つかりません"):
-        pcc.fit(base[["選択セットID", "choice"]], choice="choice",
-                choice_set_id_col="選択セットID")
+        pcc.fit(
+            base[["選択セットID", "choice"]],
+            choice="choice",
+            choice_set_id_col="選択セットID",
+        )
 
     print("OK test_fit_validation_errors")
 
@@ -373,8 +430,12 @@ def test_wtp_requires_linear_price():
     """価格が説明変数に含まれない場合、wtp() は日本語エラーを出す"""
     df = _simulate_choice_data(n_sets=200, seed=5)
     df_coded = pcc.encode(df, reference_levels={"brand": "A"})
-    result = pcc.fit(df_coded, choice="choice", choice_set_id_col="選択セットID",
-                     encoded_columns=["brand_B", "brand_C"])
+    result = pcc.fit(
+        df_coded,
+        choice="choice",
+        choice_set_id_col="選択セットID",
+        encoded_columns=["brand_B", "brand_C"],
+    )
     with pytest.raises(ValueError, match="価格列"):
         result.wtp()
     print("OK test_wtp_requires_linear_price")

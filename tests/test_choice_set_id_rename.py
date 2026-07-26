@@ -5,6 +5,7 @@
 - fit() が choice_set_id_col 引数を受け取って動くこと。
 - 旧名（set_id 出力・obsID 出力・choice_set_col 引数）がもう存在しないこと。
 """
+
 import sys
 from pathlib import Path
 
@@ -37,13 +38,14 @@ def _make_microsoft_xlsx(path, answers):
         "Name": [""] * n,
     }
     for q in range(N_SETS):
-        data[f"Q{q+1}. どの製品を選びますか？"] = [a[q] for a in answers]
+        data[f"Q{q + 1}. どの製品を選びますか？"] = [a[q] for a in answers]
     pd.DataFrame(data).to_excel(path, index=False)
 
 
 # ---------------------------------------------------------------------------
 # 設計側と生成側で同じ列名 choice_set_id を出力する
 # ---------------------------------------------------------------------------
+
 
 def test_design_outputs_choice_set_id(design):
     assert "choice_set_id" in design.columns
@@ -80,20 +82,26 @@ def test_design_and_forms_use_same_set_identifier(tmp_path, design):
 # fit() は choice_set_id_col を受け取る
 # ---------------------------------------------------------------------------
 
+
 def _toy_choice_df(seed=0):
     rng = np.random.default_rng(seed)
     rows = []
     for t in range(300):
         pr = rng.choice([100, 200], 2)
         br = rng.choice(["A", "B"], 2)
-        v = np.array([-0.01 * p + (0.5 if b == "B" else 0.0)
-                      for p, b in zip(pr, br)])
+        v = np.array([-0.01 * p + (0.5 if b == "B" else 0.0) for p, b in zip(pr, br)])
         prob = np.exp(v - v.max())
         prob = prob / prob.sum()
         ch = (rng.random() < prob.cumsum()).argmax()
         for j in range(2):
-            rows.append({"choice_set_id": t, "choice": int(j == ch),
-                         "price": int(pr[j]), "brand": br[j]})
+            rows.append(
+                {
+                    "choice_set_id": t,
+                    "choice": int(j == ch),
+                    "price": int(pr[j]),
+                    "brand": br[j],
+                }
+            )
     return pd.DataFrame(rows)
 
 
@@ -108,6 +116,7 @@ def test_fit_accepts_choice_set_id_col():
 # ---------------------------------------------------------------------------
 # 旧名はもう存在しない（使うとエラーになる）
 # ---------------------------------------------------------------------------
+
 
 def test_old_choice_set_col_arg_rejected():
     df = _toy_choice_df()

@@ -26,6 +26,7 @@ from .analysis import _is_index_artifact_column
 # 公開API
 # ---------------------------------------------------------------------------
 
+
 def forms_to_data(
     responses_file: str,
     profiles: "pd.DataFrame | Dict[str, Sequence]",
@@ -146,9 +147,7 @@ def forms_to_data(
     # 保存した CSV を読み込むと、index（プロファイルID）がこのような列に
     # なって混入し、属性として出力に紛れ込んでしまうため。
     if isinstance(profiles, pd.DataFrame):
-        artifact_cols = [
-            c for c in profiles.columns if _is_index_artifact_column(c)
-        ]
+        artifact_cols = [c for c in profiles.columns if _is_index_artifact_column(c)]
         if artifact_cols:
             warnings.warn(
                 f"profiles に pandas の行番号列とみられる列があります: {artifact_cols}\n"
@@ -227,7 +226,9 @@ def forms_to_data(
     non_rating_cols = set(system_cols) | set(respondent_src_cols)
     rating_candidate_cols = [c for c in raw.columns if c not in non_rating_cols]
 
-    rating_cols = _pick_rating_cols(rating_candidate_cols, raw, n_profiles, responses_file)
+    rating_cols = _pick_rating_cols(
+        rating_candidate_cols, raw, n_profiles, responses_file
+    )
 
     # ------------------------------------------------------------------
     # 3. 回答者IDを付与
@@ -247,7 +248,7 @@ def forms_to_data(
         respondent_dst_cols = []
 
     # 評点列をプロファイルID（文字列）にリネームして wide→long 変換しやすくする
-    profile_ids = [f"{profile_id_prefix}{i+1}" for i in range(n_profiles)]
+    profile_ids = [f"{profile_id_prefix}{i + 1}" for i in range(n_profiles)]
     rating_rename = dict(zip(rating_cols, profile_ids))
     df_wide = df_wide.rename(columns=rating_rename)
 
@@ -266,9 +267,7 @@ def forms_to_data(
     # あり、そのまま fit() に渡すと statsmodels の分かりにくいエラーになる。
     # 数値化できない値（空欄・記号など）は NaN になり、fit() の欠損処理に乗る。
     n_nonnull_before = df_long[rating_colname].notna().sum()
-    df_long[rating_colname] = pd.to_numeric(
-        df_long[rating_colname], errors="coerce"
-    )
+    df_long[rating_colname] = pd.to_numeric(df_long[rating_colname], errors="coerce")
     n_coerced = n_nonnull_before - df_long[rating_colname].notna().sum()
     if n_coerced > 0:
         warnings.warn(
@@ -284,9 +283,7 @@ def forms_to_data(
     profile_order = {pid: i for i, pid in enumerate(profile_ids)}
     df_long = df_long.sort_values(
         [respondent_id_colname, profile_id_colname],
-        key=lambda s: (
-            s.map(profile_order) if s.name == profile_id_colname else s
-        ),
+        key=lambda s: s.map(profile_order) if s.name == profile_id_colname else s,
     )
     df_long = df_long.reset_index(drop=True)
 
@@ -504,6 +501,7 @@ def _detect_system_cols(df: pd.DataFrame, patterns: List[str]) -> List[str]:
 # 内部ヘルパー関数：評点列の選択・バリデーション
 # ---------------------------------------------------------------------------
 
+
 def _pick_rating_cols(
     candidates: List[str],
     df: pd.DataFrame,
@@ -517,16 +515,16 @@ def _pick_rating_cols(
     1. 数値型（または数値変換可能）の候補列が n_profiles 個以上ある
        → そのうち右端の n_profiles 列を採用
        （候補が n_profiles を超える場合は、除外した列名を UserWarning で明示する。
-       　評点でない数値質問（満足度・年齢など）が混在していると、評点と
-       　プロファイルの対応が気づかないままズレる恐れがあるため。）
+       評点でない数値質問（満足度・年齢など）が混在していると、評点と
+       プロファイルの対応が気づかないままズレる恐れがあるため。）
     2. 候補列全体が n_profiles 個以上ある
        → 右端の n_profiles 列を採用（数値変換できるか確認）
     3. 上記でも取得できなければ ValueError
     """
     numeric_candidates = [
-        c for c in candidates
-        if pd.api.types.is_numeric_dtype(df[c])
-        or _is_coercible_to_numeric(df[c])
+        c
+        for c in candidates
+        if pd.api.types.is_numeric_dtype(df[c]) or _is_coercible_to_numeric(df[c])
     ]
 
     if len(numeric_candidates) >= n_profiles:
@@ -574,6 +572,7 @@ def _is_coercible_to_numeric(series: pd.Series) -> bool:
 # 内部ヘルパー関数：プロファイル設計・属性の処理
 # ---------------------------------------------------------------------------
 
+
 def _build_profile_design(
     profile_ids: List[str],
     profiles: Sequence[Dict[str, Sequence]],
@@ -595,7 +594,9 @@ def _infer_n_profiles(
         return len(profiles)
     if isinstance(profiles, dict):
         if not profiles:
-            raise ValueError("profiles が空です。少なくとも1つの属性を指定してください。")
+            raise ValueError(
+                "profiles が空です。少なくとも1つの属性を指定してください。"
+            )
         return len(next(iter(profiles.values())))
     raise TypeError(
         f"profiles は pd.DataFrame または dict を指定してください。\n"
@@ -619,10 +620,7 @@ def _normalize_profiles(
                 f"profiles の行数 ({len(profiles)}) が "
                 f"n_profiles ({n_profiles}) と一致しません。"
             )
-        return [
-            {col: list(profiles[col])}
-            for col in profiles.columns
-        ]
+        return [{col: list(profiles[col])} for col in profiles.columns]
     if isinstance(profiles, dict):
         return [{k: list(v)} for k, v in profiles.items()]
     raise TypeError(
@@ -654,7 +652,7 @@ def _check_profiles(
         if not isinstance(attr_dict, dict) or len(attr_dict) != 1:
             raise ValueError(
                 f"profiles[{i}] は キー1つの辞書である必要があります。\n"
-                f"例：{{\"price\": [6, 10, 6, 10]}}\n"
+                f'例：{{"price": [6, 10, 6, 10]}}\n'
                 f"実際の値：{attr_dict}"
             )
         attr_name, levels = list(attr_dict.items())[0]

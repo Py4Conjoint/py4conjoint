@@ -25,6 +25,8 @@ Python 実装（scipy.optimize, BFGS, 解析的勾配）による事前検証で
 # 変数の並び順は encode() の出力と揃えること
 COEF_NAMES = ["price", "feat", "brandhiland", "brandweight", "brandyoplait"]
 
+# fmt: off
+# R の logitr の出力と目視で照合するための表。小数点の位置を揃えてある。
 COEF = {
     "price":        -0.366555,
     "feat":          0.491439,
@@ -40,12 +42,13 @@ STD_ERR = {
     "brandweight":   0.054498,
     "brandyoplait":  0.080642,
 }
+# fmt: on
 
 LOG_LIKELIHOOD = -2656.8878790
 NULL_LOG_LIKELIHOOD = -3343.7419990
-N_OBS = 2412            # 選択セット数
-N_ALTS = 4              # 1セットあたりの代替案数
-REFERENCE_LEVEL = "dannon"   # brand の基準水準
+N_OBS = 2412  # 選択セット数
+N_ALTS = 4  # 1セットあたりの代替案数
+REFERENCE_LEVEL = "dannon"  # brand の基準水準
 
 # 検証テストの推奨許容誤差
 RTOL_COEF = 1e-3

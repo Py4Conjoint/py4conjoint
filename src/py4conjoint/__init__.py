@@ -22,6 +22,7 @@ v0.4.0 から、機能はサブパッケージとして提供されます：
 v0.4.0 で廃止されました。``import py4conjoint.rating as pcr`` を
 使ってください。
 """
+
 from __future__ import annotations
 
 import importlib
@@ -29,25 +30,27 @@ import importlib
 __version__ = "0.5.0"
 
 # v0.3.x までトップレベルに存在した旧API名
-_REMOVED_API = frozenset({
-    # データ作成
-    "forms_to_conjoint_data",
-    # プロファイル設計
-    "design_profiles",
-    "suggest_n_profiles",
-    # 符号化
-    "encode",
-    "auto_reference_levels",
-    # 分析
-    "fit",
-    "ConjointResult",
-    "check_design",
-    "DesignCheckResult",
-    # 可視化
-    "plot_importance",
-    "plot_partworth",
-    "plot_wtp",
-})
+_REMOVED_API = frozenset(
+    {
+        # データ作成
+        "forms_to_conjoint_data",
+        # プロファイル設計
+        "design_profiles",
+        "suggest_n_profiles",
+        # 符号化
+        "encode",
+        "auto_reference_levels",
+        # 分析
+        "fit",
+        "ConjointResult",
+        "check_design",
+        "DesignCheckResult",
+        # 可視化
+        "plot_importance",
+        "plot_partworth",
+        "plot_wtp",
+    }
+)
 
 _SUBPACKAGES = ("rating", "choice")
 

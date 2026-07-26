@@ -28,6 +28,7 @@ analysis.py（choice 版）
   回答者ID列がある場合は rating 版と同様の
   **クラスタロバスト標準誤差**（サンドイッチ推定量）を使う。
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -56,6 +57,7 @@ from ..rating.analysis import (
 # ---------------------------------------------------------------------------
 # 公開API: fit関数
 # ---------------------------------------------------------------------------
+
 
 def fit(
     df: pd.DataFrame,
@@ -156,8 +158,10 @@ def fit(
             "df は pandas.DataFrame である必要があります。\n"
             f"  受け取った型: {type(df).__name__}"
         )
-    for col, label in [(choice, "choice（選択結果）"),
-                       (choice_set_id_col, "選択セットID")]:
+    for col, label in [
+        (choice, "choice（選択結果）"),
+        (choice_set_id_col, "選択セットID"),
+    ]:
         if col not in df.columns:
             raise ValueError(
                 f"{label} の列 '{col}' が DataFrame にありません。\n"
@@ -225,7 +229,9 @@ def fit(
         )
 
     # ---------- 選択セットごとに並べ替えて配列化 ----------
-    df_sorted = df.sort_values(choice_set_id_col, kind="mergesort").reset_index(drop=True)
+    df_sorted = df.sort_values(choice_set_id_col, kind="mergesort").reset_index(
+        drop=True
+    )
     X = df_sorted[encoded_columns].to_numpy(dtype=float)
     y = df_sorted[choice].to_numpy(dtype=float)
     codes = pd.factorize(df_sorted[choice_set_id_col])[0]
@@ -263,14 +269,14 @@ def fit(
     # 早期終了する（success=False になる）のを防げる。平均化しても最小値の位置
     # （＝推定値 beta）は変わらないため、係数・標準誤差・尤度比は不変。
     def _neg_loglik_and_grad(beta: np.ndarray) -> Tuple[float, np.ndarray]:
-        v = X @ beta                                   # 各行（代替案）の効用
+        v = X @ beta  # 各行（代替案）の効用
         # 数値安定化：選択セットごとに最大効用を引く（softmax の定石）
         vmax = np.maximum.reduceat(v, starts)
         vc = v - np.repeat(vmax, counts)
         ev = np.exp(vc)
-        denom = np.add.reduceat(ev, starts)            # 選択セットごとの分母
+        denom = np.add.reduceat(ev, starts)  # 選択セットごとの分母
         ll = vc[chosen_mask].sum() - np.log(denom).sum()
-        p = ev / np.repeat(denom, counts)              # 各代替案の選択確率
+        p = ev / np.repeat(denom, counts)  # 各代替案の選択確率
         # 解析的勾配: Σ (x_chosen − Σ_j p_j x_j)
         grad = X[chosen_mask].sum(axis=0) - p @ X
         # 選択セット数で割って「平均」にする（最小化の解は不変）
@@ -297,7 +303,7 @@ def fit(
     denom = np.add.reduceat(ev, starts)
     p_hat = ev / np.repeat(denom, counts)
     Xw = X * p_hat[:, None]
-    B = np.add.reduceat(Xw, starts, axis=0)            # Σ_j p_j x_j（セットごと）
+    B = np.add.reduceat(Xw, starts, axis=0)  # Σ_j p_j x_j（セットごと）
     H = X.T @ Xw - B.T @ B
 
     try:
@@ -323,13 +329,13 @@ def fit(
                 "  一意になるようにしてください。"
             )
         # 選択セットごとのスコア（対数尤度の勾配への寄与）
-        scores = X[chosen_mask] - B                    # (n_sets, k)
+        scores = X[chosen_mask] - B  # (n_sets, k)
         resp_of_set = resp_per_row.to_numpy()[starts]
         cluster_codes = pd.factorize(resp_of_set)[0]
         m = int(cluster_codes.max()) + 1
         g = np.zeros((m, k))
-        np.add.at(g, cluster_codes, scores)            # クラスタごとのスコア和
-        correction = m / (m - 1)                       # 小標本補正
+        np.add.at(g, cluster_codes, scores)  # クラスタごとのスコア和
+        correction = m / (m - 1)  # 小標本補正
         meat = correction * (g.T @ g)
         cov = cov @ meat @ cov
         se_type = "cluster"
@@ -380,6 +386,7 @@ def fit(
 # 結果オブジェクト
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class ChoiceConjointResult:
     """
@@ -429,6 +436,7 @@ class ChoiceConjointResult:
     n_iter : int
         最適化の反復回数。
     """
+
     params: pd.Series
     bse: pd.Series
     pvalues: pd.Series
@@ -478,11 +486,7 @@ class ChoiceConjointResult:
         """
         rid = self.respondent_id_col
         cid = self.choice_set_id_col
-        if (
-            rid
-            and rid in self.df.columns
-            and cid in self.df.columns
-        ):
+        if rid and rid in self.df.columns and cid in self.df.columns:
             sets_per_resp = self.df.groupby(rid)[cid].nunique()
             n_resp = int(sets_per_resp.size)
             # 全回答者で設問数が等しいときのみ内訳を表示（不均衡なら総数のみ）
@@ -526,15 +530,15 @@ class ChoiceConjointResult:
             else "通常（選択セット間の独立性を仮定）"
         )
         stat_rows = [
-            ("観測数（行数）",   str(self.n_obs)),
+            ("観測数（行数）", str(self.n_obs)),
             self._n_sets_row(),
-            ("説明変数の数",     str(len(self.encoded_columns))),
-            ("対数尤度",         f"{self.loglik:.4f}"),
+            ("説明変数の数", str(len(self.encoded_columns))),
+            ("対数尤度", f"{self.loglik:.4f}"),
             ("擬似決定係数 R²（McFadden）", f"{self.pseudo_rsquared:.4f}"),
-            ("標準誤差",         se_label),
+            ("標準誤差", se_label),
         ]
         if not self.converged:
-            stat_rows.append(("収束",     "失敗（結果は信頼できません）"))
+            stat_rows.append(("収束", "失敗（結果は信頼できません）"))
         if self.n_dropped > 0:
             stat_rows.append(("欠損で除外", f"{self.n_dropped} 行"))
         max_label_w = max(_display_width(lbl) for lbl, _ in stat_rows)
@@ -550,11 +554,16 @@ class ChoiceConjointResult:
             lines.append(
                 "  "
                 + _ljust_display("変数", NAME_WIDTH)
-                + " " + _rjust_display("係数", 10)
-                + " " + _rjust_display("p値", 10)
-                + "  " + "有意性"
+                + " "
+                + _rjust_display("係数", 10)
+                + " "
+                + _rjust_display("p値", 10)
+                + "  "
+                + "有意性"
             )
-            lines.append(f"  {'-' * NAME_WIDTH} {'-' * 10} {'-' * 10}  {'-' * STAR_WIDTH}")
+            lines.append(
+                f"  {'-' * NAME_WIDTH} {'-' * 10} {'-' * 10}  {'-' * STAR_WIDTH}"
+            )
             for name in self.params.index:
                 coef = self.params[name]
                 p = self.pvalues[name]
@@ -566,11 +575,16 @@ class ChoiceConjointResult:
             lines.append(
                 "  "
                 + _ljust_display("変数", NAME_WIDTH)
-                + " " + _rjust_display("係数", 10)
-                + " " + _rjust_display("標準誤差", 10)
-                + " " + _rjust_display("z値", 10)
-                + " " + _rjust_display("p値", 10)
-                + "  " + "有意性"
+                + " "
+                + _rjust_display("係数", 10)
+                + " "
+                + _rjust_display("標準誤差", 10)
+                + " "
+                + _rjust_display("z値", 10)
+                + " "
+                + _rjust_display("p値", 10)
+                + "  "
+                + "有意性"
             )
             lines.append(
                 f"  {'-' * NAME_WIDTH} {'-' * 10} {'-' * 10} {'-' * 10} {'-' * 10}  {'-' * STAR_WIDTH}"
@@ -630,61 +644,72 @@ class ChoiceConjointResult:
             else "通常（選択セット間の独立性を仮定）"
         )
         stat_rows = [
-            ("観測数（行数）",   str(self.n_obs)),
+            ("観測数（行数）", str(self.n_obs)),
             self._n_sets_row(),
-            ("説明変数の数",     str(len(self.encoded_columns))),
-            ("対数尤度",         f"{self.loglik:.4f}"),
+            ("説明変数の数", str(len(self.encoded_columns))),
+            ("対数尤度", f"{self.loglik:.4f}"),
             ("擬似決定係数 R²（McFadden）", f"{self.pseudo_rsquared:.4f}"),
-            ("標準誤差",         se_label),
+            ("標準誤差", se_label),
         ]
         if not self.converged:
             stat_rows.append(("収束", "失敗（結果は信頼できません）"))
         if self.n_dropped > 0:
             stat_rows.append(("欠損で除外", f"{self.n_dropped} 行"))
 
-        p = ['<div>',
-             '<p><strong>選択型コンジョイント分析の結果</strong></p>']
+        p = ["<div>", "<p><strong>選択型コンジョイント分析の結果</strong></p>"]
         p.append(f'<table style="{_tbl}">')
         for lbl, val in stat_rows:
-            p.append(f'<tr>{td(lbl)}{td(val)}</tr>')
-        p.append('</table>')
+            p.append(f"<tr>{td(lbl)}{td(val)}</tr>")
+        p.append("</table>")
 
-        p.append('<p><strong>【推定された係数（部分効用 part-worth）】</strong></p>')
+        p.append("<p><strong>【推定された係数（部分効用 part-worth）】</strong></p>")
         p.append(f'<table style="{_tbl}">')
-        p.append('<tr>'
-                 + th("変数") + th("係数", "right")
-                 + th("p値", "right") + th("有意性", "right")
-                 + '</tr>')
+        p.append(
+            "<tr>"
+            + th("変数")
+            + th("係数", "right")
+            + th("p値", "right")
+            + th("有意性", "right")
+            + "</tr>"
+        )
         for name in self.params.index:
             c = self.params[name]
             pv = self.pvalues[name]
             star = _significance_stars(pv)
-            p.append('<tr>'
-                     + td(name) + td(f"{c:.4f}", "right")
-                     + td(f"{pv:.4f}", "right") + td(star, "right")
-                     + '</tr>')
-        p.append('</table>')
-        p.append('<p style="font-size:0.85em;color:#888;">'
-                 '有意水準: *** p&lt;0.001&nbsp; ** p&lt;0.01&nbsp;'
-                 ' * p&lt;0.05&nbsp; . p&lt;0.1</p>')
+            p.append(
+                "<tr>"
+                + td(name)
+                + td(f"{c:.4f}", "right")
+                + td(f"{pv:.4f}", "right")
+                + td(star, "right")
+                + "</tr>"
+            )
+        p.append("</table>")
+        p.append(
+            '<p style="font-size:0.85em;color:#888;">'
+            "有意水準: *** p&lt;0.001&nbsp; ** p&lt;0.01&nbsp;"
+            " * p&lt;0.05&nbsp; . p&lt;0.1</p>"
+        )
 
         major = [d for d in self._diagnostics if d.severity == "大"]
         minor = [d for d in self._diagnostics if d.severity != "大"]
         if major:
-            p.append('<p><strong>⚠️ 重大な注意事項</strong></p><ul>')
+            p.append("<p><strong>⚠️ 重大な注意事項</strong></p><ul>")
             for d in major:
-                p.append(f'<li><strong>[{escape(d.severity)}]</strong> '
-                         f'{escape(d.message)}<br>'
-                         f'&nbsp;&nbsp;→ {escape(d.recommendation)}</li>')
-            p.append('</ul>')
+                p.append(
+                    f"<li><strong>[{escape(d.severity)}]</strong> "
+                    f"{escape(d.message)}<br>"
+                    f"&nbsp;&nbsp;→ {escape(d.recommendation)}</li>"
+                )
+            p.append("</ul>")
         if minor:
             p.append(
                 f'<p style="font-size:0.9em;color:#888;">'
-                f'その他の注意事項が {len(minor)} 件あります。'
-                f'result.warnings() で確認できます。</p>'
+                f"その他の注意事項が {len(minor)} 件あります。"
+                f"result.warnings() で確認できます。</p>"
             )
-        p.append('</div>')
-        return '\n'.join(p)
+        p.append("</div>")
+        return "\n".join(p)
 
     # ---- 警告（落とし穴）の取得 -------------------------------------------
 
@@ -906,9 +931,7 @@ class ChoiceConjointResult:
             and price_col in self.df.columns
             and pd.api.types.is_numeric_dtype(self.df[price_col])
         )
-        price_encoded = (
-            None if numeric_price else self._price_dummy_columns(price_col)
-        )
+        price_encoded = None if numeric_price else self._price_dummy_columns(price_col)
         if not numeric_price and not price_encoded:
             raise ValueError(
                 f"価格列 '{price_col}' に対応する説明変数が見つかりません。\n"
@@ -926,15 +949,17 @@ class ChoiceConjointResult:
             levels = sorted(float(x) for x in price_vals.unique())
             util = {}
             # 数値線形は区間が1本（傾き = β_price）のみ
-            segs = [{
-                "low": float(price_vals.min()),
-                "high": float(price_vals.max()),
-                "label": (
-                    f"{_format_price_level(price_vals.min())}〜"
-                    f"{_format_price_level(price_vals.max())}"
-                ),
-                "slope": b_price,
-            }]
+            segs = [
+                {
+                    "low": float(price_vals.min()),
+                    "high": float(price_vals.max()),
+                    "label": (
+                        f"{_format_price_level(price_vals.min())}〜"
+                        f"{_format_price_level(price_vals.max())}"
+                    ),
+                    "slope": b_price,
+                }
+            ]
         else:
             price_set = set(price_encoded)
             p_price = self._price_pvalue(price_encoded)
@@ -979,19 +1004,24 @@ class ChoiceConjointResult:
             )
         if method == "linear" and len(segs) >= 2:
             # 線形近似：全水準を1本の傾きにまとめ直す
-            slope_lin = float(np.polyfit(
-                np.array(levels, dtype=float),
-                np.array([util[lv] for lv in levels], dtype=float),
-                1,
-            )[0])
-            segs = [{
-                "low": low_price, "high": high_price,
-                "label": (
-                    f"{_format_price_level(low_price)}〜"
-                    f"{_format_price_level(high_price)}"
-                ),
-                "slope": slope_lin,
-            }]
+            slope_lin = float(
+                np.polyfit(
+                    np.array(levels, dtype=float),
+                    np.array([util[lv] for lv in levels], dtype=float),
+                    1,
+                )[0]
+            )
+            segs = [
+                {
+                    "low": low_price,
+                    "high": high_price,
+                    "label": (
+                        f"{_format_price_level(low_price)}〜"
+                        f"{_format_price_level(high_price)}"
+                    ),
+                    "slope": slope_lin,
+                }
+            ]
             cat_key = "wtp_price_linear_approx"
             if cat_key not in already_cats:
                 self._diagnostics.append(
@@ -1019,8 +1049,11 @@ class ChoiceConjointResult:
                 if col in price_set:
                     continue
                 b = float(self.params[col])
-                row = {"variable": col, "係数": b,
-                       "限界支払意思額": b * money_per_utility}
+                row = {
+                    "variable": col,
+                    "係数": b,
+                    "限界支払意思額": b * money_per_utility,
+                }
                 if multi_segment:
                     row["価格区間"] = seg["label"]
                 rows.append(row)
@@ -1074,9 +1107,7 @@ class ChoiceConjointResult:
         ``encoded_columns`` と照合する。``startswith`` の前方一致は使わない
         ため、``price_range_high`` のような別属性の列を誤検出しない。
         """
-        meta = (
-            self.df.attrs.get("py4conjoint", {}) if hasattr(self.df, "attrs") else {}
-        )
+        meta = self.df.attrs.get("py4conjoint", {}) if hasattr(self.df, "attrs") else {}
         enc_map = meta.get("encoded_columns") or {}
         mapped = enc_map.get(price_col)
         if mapped:
@@ -1165,7 +1196,10 @@ class ChoiceConjointResult:
                 f"  必要な列: {self.encoded_columns}"
             )
 
-        u = products[self.encoded_columns].to_numpy(dtype=float) @ self.params.to_numpy()
+        u = (
+            products[self.encoded_columns].to_numpy(dtype=float)
+            @ self.params.to_numpy()
+        )
 
         if method in ("logit", "share_of_preference"):
             # 数値安定化のため最大値を引く（softmax）
@@ -1195,6 +1229,7 @@ class ChoiceConjointResult:
         matplotlib.axes.Axes
         """
         from .plot import plot_importance
+
         return plot_importance(self, **kwargs)
 
     def plot_partworth(self, **kwargs: Any) -> Any:
@@ -1203,6 +1238,7 @@ class ChoiceConjointResult:
         :func:`py4conjoint.choice.plot.plot_partworth` へのショートカット。
         """
         from .plot import plot_partworth
+
         return plot_partworth(self, **kwargs)
 
     def plot_wtp(self, **kwargs: Any) -> Any:
@@ -1211,6 +1247,7 @@ class ChoiceConjointResult:
         :func:`py4conjoint.choice.plot.plot_wtp` へのショートカット。
         """
         from .plot import plot_wtp
+
         return plot_wtp(self, **kwargs)
 
     # ---- 内部処理 ---------------------------------------------------------
@@ -1239,7 +1276,8 @@ class ChoiceConjointResult:
         for attr, cols in groups.items():
             if attr in self.reference_levels:
                 utils = np.append(
-                    [float(self.params[c]) for c in cols], 0.0  # 基準水準の効用
+                    [float(self.params[c]) for c in cols],
+                    0.0,  # 基準水準の効用
                 )
                 ranges[attr] = float(utils.max() - utils.min())
             else:

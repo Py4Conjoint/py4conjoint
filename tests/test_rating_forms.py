@@ -7,6 +7,7 @@
 - 出力の行順：profile_id は提示順（P1, P2, …, P10, …）で並ぶ
   （文字列の辞書順 P1, P10, P11, P2, … にならない）。
 """
+
 import sys
 from pathlib import Path
 
@@ -18,8 +19,8 @@ import pytest
 import py4conjoint.rating as pcr
 
 PROFILES = {
-    "price":  [6, 10, 6, 10],
-    "os":     ["android", "apple", "apple", "android"],
+    "price": [6, 10, 6, 10],
+    "os": ["android", "apple", "apple", "android"],
     "camera": ["標準", "標準", "高性能", "高性能"],
 }
 
@@ -41,16 +42,20 @@ def _write_xlsx(path, extra_cols):
 # 評点列の自動検出：余分な数値列があると警告する
 # ---------------------------------------------------------------------------
 
+
 def test_warns_when_extra_numeric_column_present(tmp_path):
     """数値候補が n_profiles を超えると、除外した列名を警告で明示する。"""
     f = tmp_path / "responses.xlsx"
-    _write_xlsx(f, {
-        "Q1. 製品案1の評価": [5, 6, 7],
-        "Q2. 製品案2の評価": [3, 4, 5],
-        "Q3. 製品案3の評価": [6, 6, 7],
-        "Q4. 製品案4の評価": [4, 5, 4],
-        "総合満足度（数値）": [9, 2, 5],   # 評点でない数値質問
-    })
+    _write_xlsx(
+        f,
+        {
+            "Q1. 製品案1の評価": [5, 6, 7],
+            "Q2. 製品案2の評価": [3, 4, 5],
+            "Q3. 製品案3の評価": [6, 6, 7],
+            "Q4. 製品案4の評価": [4, 5, 4],
+            "総合満足度（数値）": [9, 2, 5],  # 評点でない数値質問
+        },
+    )
     with pytest.warns(UserWarning, match="除外した列"):
         pcr.forms_to_data(str(f), PROFILES)
 
@@ -58,14 +63,18 @@ def test_warns_when_extra_numeric_column_present(tmp_path):
 def test_no_warning_when_extra_numeric_column_in_respondent_cols(tmp_path):
     """余分な数値列を respondent_cols で指定すれば候補から外れ、警告は出ない。"""
     f = tmp_path / "responses.xlsx"
-    _write_xlsx(f, {
-        "Q1. 製品案1の評価": [5, 6, 7],
-        "Q2. 製品案2の評価": [3, 4, 5],
-        "Q3. 製品案3の評価": [6, 6, 7],
-        "Q4. 製品案4の評価": [4, 5, 4],
-        "総合満足度（数値）": [9, 2, 5],
-    })
+    _write_xlsx(
+        f,
+        {
+            "Q1. 製品案1の評価": [5, 6, 7],
+            "Q2. 製品案2の評価": [3, 4, 5],
+            "Q3. 製品案3の評価": [6, 6, 7],
+            "Q4. 製品案4の評価": [4, 5, 4],
+            "総合満足度（数値）": [9, 2, 5],
+        },
+    )
     import warnings as _w
+
     with _w.catch_warnings(record=True) as caught:
         _w.simplefilter("always")
         df = pcr.forms_to_data(
@@ -86,10 +95,10 @@ def test_missing_respondent_col_raises_friendly_error(tmp_path):
     choice 版 forms_to_data と同じチェック・同じメッセージ。
     """
     f = tmp_path / "responses.xlsx"
-    _write_xlsx(f, {
-        f"Q{i+1}. 製品案{i+1}の評価": [5, 6, 4] for i in range(4)
-    })
-    with pytest.raises(ValueError, match="respondent_cols で指定された列がファイルにありません"):
+    _write_xlsx(f, {f"Q{i + 1}. 製品案{i + 1}の評価": [5, 6, 4] for i in range(4)})
+    with pytest.raises(
+        ValueError, match="respondent_cols で指定された列がファイルにありません"
+    ):
         pcr.forms_to_data(str(f), PROFILES, respondent_cols={"存在しない列": "x"})
 
 
@@ -97,31 +106,43 @@ def test_missing_respondent_col_raises_friendly_error(tmp_path):
 # 評点の数値化（文字列の評点・変換できない値）
 # ---------------------------------------------------------------------------
 
+
 def test_string_ratings_are_coerced_to_numeric(tmp_path):
     """文字列の評点（"5" など）は数値化され、そのまま fit() まで通る。"""
     f = tmp_path / "responses.xlsx"
-    _write_xlsx(f, {
-        "Q1. 製品案1の評価": ["5", "6", "7"],
-        "Q2. 製品案2の評価": ["3", "4", "5"],
-        "Q3. 製品案3の評価": ["6", "6", "7"],
-        "Q4. 製品案4の評価": ["4", "5", "4"],
-    })
+    _write_xlsx(
+        f,
+        {
+            "Q1. 製品案1の評価": ["5", "6", "7"],
+            "Q2. 製品案2の評価": ["3", "4", "5"],
+            "Q3. 製品案3の評価": ["6", "6", "7"],
+            "Q4. 製品案4の評価": ["4", "5", "4"],
+        },
+    )
     df = pcr.forms_to_data(str(f), PROFILES)
     assert pd.api.types.is_numeric_dtype(df["rating"])
-    assert float(df.loc[
-        (df["respondent_id"] == 1) & (df["profile_id"] == "P1"), "rating"
-    ].iloc[0]) == 5.0
+    assert (
+        float(
+            df.loc[
+                (df["respondent_id"] == 1) & (df["profile_id"] == "P1"), "rating"
+            ].iloc[0]
+        )
+        == 5.0
+    )
 
 
 def test_uncoercible_rating_becomes_nan_with_warning(tmp_path):
     """数値化できない評点（"x" など）は警告のうえ NaN になる。"""
     f = tmp_path / "responses.xlsx"
-    _write_xlsx(f, {
-        "Q1. 製品案1の評価": ["5", "6", "7"],
-        "Q2. 製品案2の評価": ["3", "x", "5"],   # 回答者2の Q2 が不正値
-        "Q3. 製品案3の評価": ["6", "6", "7"],
-        "Q4. 製品案4の評価": ["4", "5", "4"],
-    })
+    _write_xlsx(
+        f,
+        {
+            "Q1. 製品案1の評価": ["5", "6", "7"],
+            "Q2. 製品案2の評価": ["3", "x", "5"],  # 回答者2の Q2 が不正値
+            "Q3. 製品案3の評価": ["6", "6", "7"],
+            "Q4. 製品案4の評価": ["4", "5", "4"],
+        },
+    )
     with pytest.warns(UserWarning, match="数値へ変換できない"):
         df = pcr.forms_to_data(str(f), PROFILES)
     bad = df[(df["respondent_id"] == 2) & (df["profile_id"] == "P2")]
@@ -134,6 +155,7 @@ def test_uncoercible_rating_becomes_nan_with_warning(tmp_path):
 # profiles の行番号列（Unnamed: 0）：警告のうえ属性から除外
 # ---------------------------------------------------------------------------
 
+
 def test_warns_and_drops_pandas_index_column_in_profiles(tmp_path):
     """index=False を付け忘れた profiles CSV でも、警告のうえ正しく動く。
 
@@ -142,26 +164,31 @@ def test_warns_and_drops_pandas_index_column_in_profiles(tmp_path):
     """
     profiles = pd.DataFrame(PROFILES, index=["P1", "P2", "P3", "P4"])
     csv = tmp_path / "profiles.csv"
-    profiles.to_csv(csv)                      # index=False を付け忘れたケース
+    profiles.to_csv(csv)  # index=False を付け忘れたケース
     loaded = pd.read_csv(csv)
     assert "Unnamed: 0" in loaded.columns
 
     f = tmp_path / "responses.xlsx"
-    _write_xlsx(f, {
-        f"Q{i+1}. 製品案{i+1}の評価": [5, 6, 4] for i in range(4)
-    })
+    _write_xlsx(f, {f"Q{i + 1}. 製品案{i + 1}の評価": [5, 6, 4] for i in range(4)})
     with pytest.warns(UserWarning, match="index=False"):
         df = pcr.forms_to_data(str(f), loaded)
     # 行番号列は属性として混入しない
     assert "Unnamed: 0" not in df.columns
     # 属性列は本来のものだけ
-    assert set(df.columns) == {"respondent_id", "profile_id", "rating",
-                               "price", "os", "camera"}
+    assert set(df.columns) == {
+        "respondent_id",
+        "profile_id",
+        "rating",
+        "price",
+        "os",
+        "camera",
+    }
 
 
 # ---------------------------------------------------------------------------
 # 出力の行順：profile_id は提示順（数値順）
 # ---------------------------------------------------------------------------
+
 
 def test_profile_order_is_numeric_with_10plus_profiles(tmp_path):
     """n_profiles >= 10 でも P1, P2, …, P10, … の提示順で並ぶ。"""
@@ -171,12 +198,15 @@ def test_profile_order_is_numeric_with_10plus_profiles(tmp_path):
         "os": (["android"] * 6 + ["apple"] * 6),
     }
     f = tmp_path / "responses.xlsx"
-    _write_xlsx(f, {
-        f"Q{i+1}. 製品案{i+1}の評価": [((i + r) % 7) + 1 for r in range(3)]
-        for i in range(n_profiles)
-    })
+    _write_xlsx(
+        f,
+        {
+            f"Q{i + 1}. 製品案{i + 1}の評価": [((i + r) % 7) + 1 for r in range(3)]
+            for i in range(n_profiles)
+        },
+    )
     df = pcr.forms_to_data(str(f), profiles)
-    expected = [f"P{i+1}" for i in range(n_profiles)]
+    expected = [f"P{i + 1}" for i in range(n_profiles)]
     for rid in (1, 2, 3):
         got = df[df["respondent_id"] == rid]["profile_id"].tolist()
         assert got == expected, f"回答者{rid}の行順が提示順でない: {got[:5]}…"

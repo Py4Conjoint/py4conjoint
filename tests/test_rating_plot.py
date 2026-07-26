@@ -6,6 +6,7 @@
 - plot_wtp：数値ラベルが棒の外側に置かれ、x 軸範囲に余白が確保される
   （正負どちらの棒でもラベルが軸・枠と重ならない）。
 """
+
 import sys
 from pathlib import Path
 
@@ -47,9 +48,15 @@ def result():
                     u += {"A": 0.0, "B": 0.6, "C": -0.5}[brand]
                     u += 0.7 if os == "apple" else -0.7
                     u += rng.normal(0, 0.3)
-                    rows.append({"respondent_id": r,
-                                 "rating": float(np.clip(u, 1, 10)),
-                                 "price": price, "brand": brand, "os": os})
+                    rows.append(
+                        {
+                            "respondent_id": r,
+                            "rating": float(np.clip(u, 1, 10)),
+                            "price": price,
+                            "brand": brand,
+                            "os": os,
+                        }
+                    )
     df = pd.DataFrame(rows)
     dc = pcr.encode(df, reference_levels={"price": 10, "brand": "A", "os": "android"})
     return pcr.fit(dc, price_col="price")
@@ -58,6 +65,7 @@ def result():
 # ---------------------------------------------------------------------------
 # plot_partworth
 # ---------------------------------------------------------------------------
+
 
 def test_plot_partworth_smoke(result):
     ax = result.plot_partworth()
@@ -86,6 +94,7 @@ def test_plot_partworth_reference_marker(result):
 # ---------------------------------------------------------------------------
 # plot_wtp：ラベル外側配置・xlim 余白
 # ---------------------------------------------------------------------------
+
 
 def test_plot_wtp_xlim_has_padding(result):
     """棒の外側ラベルが収まるよう、x 軸範囲が棒の最大値より広い。"""

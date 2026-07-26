@@ -36,6 +36,13 @@ jobs:
       - name: 依存パッケージをインストール
         run: pip install -e ".[test]"
 
+      # 整形漏れの検出。README.md・*.ipynb・docs/ は pyproject.toml の
+      # [tool.ruff.format] exclude で対象外にしてある。
+      - name: 整形を確認
+        run: |
+          pip install ruff
+          ruff format --check .
+
       - name: テストを実行
         run: pytest --tb=short -v
 

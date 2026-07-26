@@ -17,6 +17,7 @@ rating 版の :func:`py4conjoint.rating.encode`（効果コーディング -1/+1
 API の形式（``reference_levels`` 引数で基準水準を指定する）は
 rating 版と揃えてある。
 """
+
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Union
@@ -26,6 +27,7 @@ import pandas as pd
 # ---------------------------------------------------------------------------
 # 公開API
 # ---------------------------------------------------------------------------
+
 
 def encode(
     df: pd.DataFrame,
@@ -198,6 +200,7 @@ def encode(
 # ---------------------------------------------------------------------------
 # 内部ヘルパー
 # ---------------------------------------------------------------------------
+
 
 def _unique_levels(s: pd.Series) -> List[Any]:
     """

@@ -4,6 +4,7 @@
 * check_design       : 診断結果の構造・警告検出
 * suggest_n_respondents : Johnson-Orme の経験則の計算
 """
+
 import sys
 from pathlib import Path
 
@@ -21,9 +22,16 @@ ATTRS = {"price": [100, 150, 200], "brand": ["A社", "B社", "C社"]}
 # design_choice_sets
 # ---------------------------------------------------------------------------
 
+
 def test_design_shape_and_columns():
     design = pcc.design_choice_sets(ATTRS, n_sets=8, n_alts=3, seed=42)
-    assert list(design.columns) == ["version", "choice_set_id", "alt_id", "price", "brand"]
+    assert list(design.columns) == [
+        "version",
+        "choice_set_id",
+        "alt_id",
+        "price",
+        "brand",
+    ]
     assert len(design) == 1 * 8 * 3
     assert design["version"].unique().tolist() == [1]
     assert sorted(design["choice_set_id"].unique()) == list(range(1, 9))
@@ -32,8 +40,7 @@ def test_design_shape_and_columns():
 
 
 def test_design_versions():
-    design = pcc.design_choice_sets(ATTRS, n_sets=4, n_alts=2,
-                                    n_versions=3, seed=0)
+    design = pcc.design_choice_sets(ATTRS, n_sets=4, n_alts=2, n_versions=3, seed=0)
     assert len(design) == 3 * 4 * 2
     assert sorted(design["version"].unique()) == [1, 2, 3]
 
@@ -42,8 +49,9 @@ def test_design_no_duplicate_profiles_within_set():
     design = pcc.design_choice_sets(ATTRS, n_sets=50, n_alts=3, seed=1)
     for _, block in design.groupby(["version", "choice_set_id"]):
         profiles = block[["price", "brand"]].apply(tuple, axis=1)
-        assert profiles.nunique() == len(block), \
+        assert profiles.nunique() == len(block), (
             "同一選択セット内にプロファイルの重複があります"
+        )
 
 
 def test_design_reproducible_with_seed():
@@ -65,13 +73,12 @@ def test_design_validation_errors():
         pcc.design_choice_sets(ATTRS, n_sets=8, n_alts=3, n_versions=0)
     # n_alts > 完全交差の候補数（2×2=4）
     with pytest.raises(ValueError, match="完全交差の候補数"):
-        pcc.design_choice_sets(
-            {"a": [1, 2], "b": [1, 2]}, n_sets=4, n_alts=5
-        )
+        pcc.design_choice_sets({"a": [1, 2], "b": [1, 2]}, n_sets=4, n_alts=5)
     # auto_balance=True で n_candidates < 1
     with pytest.raises(ValueError, match="n_candidates"):
-        pcc.design_choice_sets(ATTRS, n_sets=8, n_alts=3,
-                               auto_balance=True, n_candidates=0)
+        pcc.design_choice_sets(
+            ATTRS, n_sets=8, n_alts=3, auto_balance=True, n_candidates=0
+        )
 
 
 def test_design_duplicate_levels_rejected():
@@ -93,8 +100,11 @@ def test_design_duplicate_levels_rejected():
 # ---------------------------------------------------------------------------
 
 # 警告が出やすい小さめのスマホ設計（auto_balance の効果が見える）
-SMARTPHONE = {"price": [6, 10], "os": ["apple", "android"],
-              "camera": ["標準", "高性能"]}
+SMARTPHONE = {
+    "price": [6, 10],
+    "os": ["apple", "android"],
+    "camera": ["標準", "高性能"],
+}
 
 
 def _cv_sum_and_warnings(design):
@@ -105,8 +115,9 @@ def _cv_sum_and_warnings(design):
 def test_auto_balance_default_is_false_and_unchanged():
     """auto_balance を指定しなければ従来と完全に同一の設計（後方互換）。"""
     d_plain = pcc.design_choice_sets(SMARTPHONE, n_sets=6, n_alts=3, seed=0)
-    d_default = pcc.design_choice_sets(SMARTPHONE, n_sets=6, n_alts=3, seed=0,
-                                       auto_balance=False)
+    d_default = pcc.design_choice_sets(
+        SMARTPHONE, n_sets=6, n_alts=3, seed=0, auto_balance=False
+    )
     pd.testing.assert_frame_equal(d_plain, d_default)
     # 従来の attrs はそのまま（auto_balance の来歴は付かない）
     assert "auto_balance" not in d_plain.attrs
@@ -116,28 +127,32 @@ def test_auto_balance_default_is_false_and_unchanged():
 def test_auto_balance_not_worse_than_single_seed():
     """auto_balance=True は、典型的な単一 seed より悪くならない。"""
     single = pcc.design_choice_sets(SMARTPHONE, n_sets=6, n_alts=3, seed=0)
-    auto = pcc.design_choice_sets(SMARTPHONE, n_sets=6, n_alts=3, seed=0,
-                                  auto_balance=True, n_candidates=200)
+    auto = pcc.design_choice_sets(
+        SMARTPHONE, n_sets=6, n_alts=3, seed=0, auto_balance=True, n_candidates=200
+    )
     cv_s, w_s = _cv_sum_and_warnings(single)
     cv_a, w_a = _cv_sum_and_warnings(auto)
-    assert w_a <= w_s        # 警告数は同等以下
+    assert w_a <= w_s  # 警告数は同等以下
     assert cv_a <= cv_s + 1e-9  # CV 合計も同等以下
 
 
 def test_auto_balance_reproducible_with_seed():
     """同じ seed・引数なら auto_balance でも毎回同じ設計（同じ署名）。"""
-    d1 = pcc.design_choice_sets(SMARTPHONE, n_sets=6, n_alts=3, seed=7,
-                                auto_balance=True, n_candidates=50)
-    d2 = pcc.design_choice_sets(SMARTPHONE, n_sets=6, n_alts=3, seed=7,
-                                auto_balance=True, n_candidates=50)
+    d1 = pcc.design_choice_sets(
+        SMARTPHONE, n_sets=6, n_alts=3, seed=7, auto_balance=True, n_candidates=50
+    )
+    d2 = pcc.design_choice_sets(
+        SMARTPHONE, n_sets=6, n_alts=3, seed=7, auto_balance=True, n_candidates=50
+    )
     pd.testing.assert_frame_equal(d1, d2)
     assert d1.attrs["design_signature"] == d2.attrs["design_signature"]
 
 
 def test_auto_balance_records_provenance():
     """選定の来歴が attrs に入る（候補数・警告数・CV 合計）。"""
-    d = pcc.design_choice_sets(SMARTPHONE, n_sets=6, n_alts=3, seed=1,
-                               auto_balance=True, n_candidates=100)
+    d = pcc.design_choice_sets(
+        SMARTPHONE, n_sets=6, n_alts=3, seed=1, auto_balance=True, n_candidates=100
+    )
     prov = d.attrs["auto_balance"]
     assert prov["n_candidates"] == 100
     cv_sum, n_warn = _cv_sum_and_warnings(d)
@@ -148,8 +163,9 @@ def test_auto_balance_records_provenance():
 
 def test_auto_balance_small_n_candidates_ok():
     """小さい n_candidates でもエラーなく動く。"""
-    d = pcc.design_choice_sets(SMARTPHONE, n_sets=6, n_alts=3, seed=2,
-                               auto_balance=True, n_candidates=1)
+    d = pcc.design_choice_sets(
+        SMARTPHONE, n_sets=6, n_alts=3, seed=2, auto_balance=True, n_candidates=1
+    )
     assert len(d) == 6 * 3
     assert d.attrs["auto_balance"]["n_candidates"] == 1
 
@@ -158,9 +174,9 @@ def test_auto_balance_small_n_candidates_ok():
 # check_design
 # ---------------------------------------------------------------------------
 
+
 def test_check_design_structure():
-    design = pcc.design_choice_sets(ATTRS, n_sets=30, n_alts=3,
-                                    n_versions=2, seed=42)
+    design = pcc.design_choice_sets(ATTRS, n_sets=30, n_alts=3, n_versions=2, seed=42)
     res = pcc.check_design(design)
     assert isinstance(res, pcc.ChoiceDesignCheckResult)
     # balance: 属性ごとに1行
@@ -171,8 +187,9 @@ def test_check_design_structure():
     assert "χ²/自由度" in res.chi2.columns
     # overlap: 属性ごとに1行、率は 0〜1
     assert sorted(res.overlap.index) == ["brand", "price"]
-    assert ((res.overlap["オーバーラップ率"] >= 0)
-            & (res.overlap["オーバーラップ率"] <= 1)).all()
+    assert (
+        (res.overlap["オーバーラップ率"] >= 0) & (res.overlap["オーバーラップ率"] <= 1)
+    ).all()
     # 和文サマリー
     text = res.summary()
     assert "選択セット設計チェック" in text
@@ -180,25 +197,25 @@ def test_check_design_structure():
     assert "セット内オーバーラップ" in text
     # warnings() は DataFrame
     w = res.warnings()
-    assert list(w.columns) == ["severity", "category", "message",
-                               "recommendation"]
+    assert list(w.columns) == ["severity", "category", "message", "recommendation"]
 
 
 def test_check_design_detects_overlap():
     """全代替案が同じ水準を持つ設計ではオーバーラップ警告が出る。"""
     # brand が全セットで同一水準になるよう手作りする
-    design = pd.DataFrame({
-        "version": [1] * 8,
-        "choice_set_id":  [1, 1, 2, 2, 3, 3, 4, 4],
-        "alt_id":  [1, 2] * 4,
-        "price":   [100, 150, 150, 200, 100, 200, 150, 100],
-        "brand":   ["A社", "A社", "B社", "B社", "A社", "A社", "B社", "B社"],
-    })
+    design = pd.DataFrame(
+        {
+            "version": [1] * 8,
+            "choice_set_id": [1, 1, 2, 2, 3, 3, 4, 4],
+            "alt_id": [1, 2] * 4,
+            "price": [100, 150, 150, 200, 100, 200, 150, 100],
+            "brand": ["A社", "A社", "B社", "B社", "A社", "A社", "B社", "B社"],
+        }
+    )
     res = pcc.check_design(design)
     cats = [d.category for d in res.diagnostics]
     assert "overlap_brand" in cats
-    overlap_diags = [d for d in res.diagnostics
-                     if d.category == "overlap_brand"]
+    overlap_diags = [d for d in res.diagnostics if d.category == "overlap_brand"]
     assert overlap_diags[0].severity == "大"
 
 
@@ -214,7 +231,7 @@ def test_check_design_ignores_pandas_index_column(tmp_path):
     """index=False を付け忘れた design CSV でも、行番号列を属性として診断しない。"""
     design = pcc.design_choice_sets(ATTRS, n_sets=8, n_alts=3, seed=42)
     csv = tmp_path / "design.csv"
-    design.to_csv(csv)                        # index=False を付け忘れたケース
+    design.to_csv(csv)  # index=False を付け忘れたケース
     loaded = pd.read_csv(csv)
     assert "Unnamed: 0" in loaded.columns
     res = pcc.check_design(loaded)
@@ -226,6 +243,7 @@ def test_check_design_ignores_pandas_index_column(tmp_path):
 # ---------------------------------------------------------------------------
 # suggest_n_respondents
 # ---------------------------------------------------------------------------
+
 
 def test_suggest_n_respondents_johnson_orme(capsys):
     # c=3, t=8, a=3 → n ≥ 500*3/(8*3) = 62.5 → 63
@@ -263,10 +281,11 @@ def test_suggest_n_respondents_errors():
 # 統合：design → check_design がきれいな設計で警告を出さない
 # ---------------------------------------------------------------------------
 
+
 def test_large_random_design_is_clean():
-    design = pcc.design_choice_sets(ATTRS, n_sets=100, n_alts=3,
-                                    n_versions=5, seed=42)
+    design = pcc.design_choice_sets(ATTRS, n_sets=100, n_alts=3, n_versions=5, seed=42)
     res = pcc.check_design(design)
     severities = [d.severity for d in res.diagnostics]
-    assert "大" not in severities, \
+    assert "大" not in severities, (
         f"十分大きいランダム設計で重大警告が出ました: {res.warnings()}"
+    )

@@ -54,6 +54,7 @@ examples/ のノートブック（rating 用・choice 用）で使うデモデ�
 生成後、8ファイルが実際に読めることをスクリプト自身が検証する
 （:func:`_verify`）。「生成はできたが読めない」という事故を防ぐため。
 """
+
 from __future__ import annotations
 
 import sys
@@ -74,7 +75,7 @@ HERE = Path(__file__).resolve().parent
 # ---------------------------------------------------------------------------
 # 属性と水準（4つのデータで共通。変わるのは price の水準数だけ）
 # ---------------------------------------------------------------------------
-PRICE_LEVELS_2 = [6, 10]           # 単位：万円
+PRICE_LEVELS_2 = [6, 10]  # 単位：万円
 PRICE_LEVELS_3 = [6, 8, 10]
 OS_LEVELS = ["android", "apple"]
 CAMERA_LEVELS = ["標準", "高性能"]
@@ -107,7 +108,7 @@ N_RESPONDENTS = 100
 # ---------------------------------------------------------------------------
 # 乱数シード（再現性のため、すべてここに集約する）
 # ---------------------------------------------------------------------------
-SEED_RESPONDENTS = 20260701       # 100人の個人差（4データで共通）
+SEED_RESPONDENTS = 20260701  # 100人の個人差（4データで共通）
 
 # 設計の seed は check_design() の警告が少なくなるものを選んである。
 # 特に price の水準バランスを優先した（WTP の説明で使う属性のため）。
@@ -120,9 +121,9 @@ SEED_DESIGN_RATING_3PRICE = 643
 SEED_DESIGN_CHOICE_2PRICE = 180
 SEED_DESIGN_CHOICE_3PRICE = 94
 
-SEED_ANSWER_RATING_2PRICE = 20260711   # 評点の誤差項
+SEED_ANSWER_RATING_2PRICE = 20260711  # 評点の誤差項
 SEED_ANSWER_RATING_3PRICE = 20260712
-SEED_ANSWER_CHOICE_2PRICE = 20260713   # 選択の確率的な引き
+SEED_ANSWER_CHOICE_2PRICE = 20260713  # 選択の確率的な引き
 SEED_ANSWER_CHOICE_3PRICE = 20260714
 
 # 回答時刻の散らばり。4ファイルで別々の値にする（同じ値だと4ファイルの
@@ -139,23 +140,23 @@ SEED_TIMESTAMP_CHOICE_3PRICE = 20260724
 # 価格の効用は水準ごとに指定する。6→8 は -0.35、8→10 は -1.15 と
 # 下落幅を変えてあり、価格に対して非線形になっている。
 TRUE_UTIL_PRICE = {6: 0.0, 8: -0.35, 10: -1.50}
-SD_UTIL_PRICE = 0.15               # 価格効用の個人差（水準ごとに独立）
+SD_UTIL_PRICE = 0.15  # 価格効用の個人差（水準ごとに独立）
 
-TRUE_UTIL_OS_APPLE = 0.8           # android を基準にした apple の効用
+TRUE_UTIL_OS_APPLE = 0.8  # android を基準にした apple の効用
 SD_UTIL_OS = 0.4
 
-TRUE_UTIL_CAMERA_HIGH = 0.6        # 標準を基準にした高性能の効用
+TRUE_UTIL_CAMERA_HIGH = 0.6  # 標準を基準にした高性能の効用
 SD_UTIL_CAMERA = 0.3
 
 # ---------------------------------------------------------------------------
 # 評点の尺度（変更しやすいようにここにまとめる）
 # ---------------------------------------------------------------------------
-RATING_MIN = 1                     # 評点は 1〜10 の整数
+RATING_MIN = 1  # 評点は 1〜10 の整数
 RATING_MAX = 10
-RATING_CENTER = 5.5                # 効用0のときの平均的な評点
-RATING_GAIN = 2.0                  # 効用1あたり何点動くか
-RATING_SD_PERSON = 0.6             # 「辛口／甘口」の個人差
-RATING_SD_NOISE = 0.8              # 1回答ごとの誤差
+RATING_CENTER = 5.5  # 効用0のときの平均的な評点
+RATING_GAIN = 2.0  # 効用1あたり何点動くか
+RATING_SD_PERSON = 0.6  # 「辛口／甘口」の個人差
+RATING_SD_NOISE = 0.8  # 1回答ごとの誤差
 
 # ---------------------------------------------------------------------------
 # 回答者属性（Forms の設問として聞く想定）
@@ -187,7 +188,10 @@ COL_Q_USED_OS = "現在使っているスマートフォンのOSはどちらで�
 # 1. 回答者（100人）を一度だけ作る
 # ---------------------------------------------------------------------------
 
-def _make_respondents(n: int = N_RESPONDENTS, seed: int = SEED_RESPONDENTS) -> pd.DataFrame:
+
+def _make_respondents(
+    n: int = N_RESPONDENTS, seed: int = SEED_RESPONDENTS
+) -> pd.DataFrame:
     """100人分の個人別部分効用と回答者属性を生成する。
 
     4つのデータすべてでこの同じ回答者を使うため、ここでしか乱数を引かない
@@ -231,7 +235,10 @@ def _utility(person: pd.Series, price: int, os_level: str, camera: str) -> float
 # 2. 設計をつくる
 # ---------------------------------------------------------------------------
 
-def _make_rating_design(price_levels: list[int], n_profiles: int, seed: int) -> pd.DataFrame:
+
+def _make_rating_design(
+    price_levels: list[int], n_profiles: int, seed: int
+) -> pd.DataFrame:
     """評点型のプロファイル設計を py4conjoint で作る。"""
     return pcr.design_profiles(_attributes(price_levels), n_profiles, seed=seed)
 
@@ -246,6 +253,7 @@ def _make_choice_design(price_levels: list[int], seed: int) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 # 3. 回答をシミュレートする
 # ---------------------------------------------------------------------------
+
 
 def _simulate_ratings(
     profiles: pd.DataFrame, respondents: pd.DataFrame, *, seed: int
@@ -317,6 +325,7 @@ def _simulate_choices(
 # 4. Microsoft Forms 形式の CSV に書き出す
 # ---------------------------------------------------------------------------
 
+
 def _rating_question_text(profiles: pd.DataFrame, i: int) -> str:
     """評点型の設問文（Forms にそのまま貼れる形）を作る。"""
     r = profiles.iloc[i - 1]
@@ -365,7 +374,9 @@ def _write_microsoft_forms_csv(
     n = len(respondents)
     rng = np.random.default_rng(seed)
     base = pd.Timestamp(start)
-    starts = sorted(base + pd.Timedelta(minutes=int(m)) for m in rng.integers(0, 800, n))
+    starts = sorted(
+        base + pd.Timedelta(minutes=int(m)) for m in rng.integers(0, 800, n)
+    )
     durations = rng.integers(60, 400, n)  # 回答所要時間（秒）
 
     out = pd.DataFrame()
@@ -376,7 +387,7 @@ def _write_microsoft_forms_csv(
         for t, d in zip(starts, durations)
     ]
     out["メール"] = "anonymous"
-    out["名前"] = ""            # 匿名回答では空欄（実際の Forms 出力と同じ）
+    out["名前"] = ""  # 匿名回答では空欄（実際の Forms 出力と同じ）
     out["最終変更時刻"] = ""
     for text, col in zip(question_texts, answers.columns):
         out[text] = answers[col].to_numpy()
@@ -415,14 +426,30 @@ def _verify() -> None:
     print("\n検証：生成したファイルを forms_to_data() で読み込みます")
 
     checks = [
-        ("responses_rating_2price.csv", "design_rating_2price.csv",
-         "rating", N_RESPONDENTS * N_PROFILES_2PRICE),
-        ("responses_rating_3price.csv", "design_rating_3price.csv",
-         "rating", N_RESPONDENTS * N_PROFILES_3PRICE),
-        ("responses_choice_2price.csv", "design_choice_2price.csv",
-         "choice", N_RESPONDENTS * N_SETS * N_ALTS),
-        ("responses_choice_3price.csv", "design_choice_3price.csv",
-         "choice", N_RESPONDENTS * N_SETS * N_ALTS),
+        (
+            "responses_rating_2price.csv",
+            "design_rating_2price.csv",
+            "rating",
+            N_RESPONDENTS * N_PROFILES_2PRICE,
+        ),
+        (
+            "responses_rating_3price.csv",
+            "design_rating_3price.csv",
+            "rating",
+            N_RESPONDENTS * N_PROFILES_3PRICE,
+        ),
+        (
+            "responses_choice_2price.csv",
+            "design_choice_2price.csv",
+            "choice",
+            N_RESPONDENTS * N_SETS * N_ALTS,
+        ),
+        (
+            "responses_choice_3price.csv",
+            "design_choice_3price.csv",
+            "choice",
+            N_RESPONDENTS * N_SETS * N_ALTS,
+        ),
     ]
 
     for resp_name, design_name, kind, expected_rows in checks:
@@ -433,7 +460,9 @@ def _verify() -> None:
             )
         else:
             df = pcc.forms_to_data(
-                str(HERE / resp_name), design, CHOICE_LABELS,
+                str(HERE / resp_name),
+                design,
+                CHOICE_LABELS,
                 respondent_cols=RESPONDENT_COLS,
             )
         n_resp = df["respondent_id"].nunique()
@@ -454,19 +483,40 @@ def _verify() -> None:
 # main
 # ---------------------------------------------------------------------------
 
+
 def main() -> None:
     respondents = _make_respondents()
     print(f"回答者を生成しました（{len(respondents)}名。4データで共通）")
 
     # ---- 評点型 ----
     print("\n評点型（rating）")
-    for tag, price_levels, n_profiles, seed_design, seed_answer, seed_timestamp, start in [
-        ("2price", PRICE_LEVELS_2, N_PROFILES_2PRICE,
-         SEED_DESIGN_RATING_2PRICE, SEED_ANSWER_RATING_2PRICE,
-         SEED_TIMESTAMP_RATING_2PRICE, "2026-06-15 09:00:00"),
-        ("3price", PRICE_LEVELS_3, N_PROFILES_3PRICE,
-         SEED_DESIGN_RATING_3PRICE, SEED_ANSWER_RATING_3PRICE,
-         SEED_TIMESTAMP_RATING_3PRICE, "2026-06-16 09:00:00"),
+    for (
+        tag,
+        price_levels,
+        n_profiles,
+        seed_design,
+        seed_answer,
+        seed_timestamp,
+        start,
+    ) in [
+        (
+            "2price",
+            PRICE_LEVELS_2,
+            N_PROFILES_2PRICE,
+            SEED_DESIGN_RATING_2PRICE,
+            SEED_ANSWER_RATING_2PRICE,
+            SEED_TIMESTAMP_RATING_2PRICE,
+            "2026-06-15 09:00:00",
+        ),
+        (
+            "3price",
+            PRICE_LEVELS_3,
+            N_PROFILES_3PRICE,
+            SEED_DESIGN_RATING_3PRICE,
+            SEED_ANSWER_RATING_3PRICE,
+            SEED_TIMESTAMP_RATING_3PRICE,
+            "2026-06-16 09:00:00",
+        ),
     ]:
         design = _make_rating_design(price_levels, n_profiles, seed_design)
         _save_design(design, HERE / f"design_rating_{tag}.csv")
@@ -483,12 +533,22 @@ def main() -> None:
     # ---- 選択型 ----
     print("\n選択型（choice）")
     for tag, price_levels, seed_design, seed_answer, seed_timestamp, start in [
-        ("2price", PRICE_LEVELS_2, SEED_DESIGN_CHOICE_2PRICE,
-         SEED_ANSWER_CHOICE_2PRICE, SEED_TIMESTAMP_CHOICE_2PRICE,
-         "2026-06-17 09:00:00"),
-        ("3price", PRICE_LEVELS_3, SEED_DESIGN_CHOICE_3PRICE,
-         SEED_ANSWER_CHOICE_3PRICE, SEED_TIMESTAMP_CHOICE_3PRICE,
-         "2026-06-18 09:00:00"),
+        (
+            "2price",
+            PRICE_LEVELS_2,
+            SEED_DESIGN_CHOICE_2PRICE,
+            SEED_ANSWER_CHOICE_2PRICE,
+            SEED_TIMESTAMP_CHOICE_2PRICE,
+            "2026-06-17 09:00:00",
+        ),
+        (
+            "3price",
+            PRICE_LEVELS_3,
+            SEED_DESIGN_CHOICE_3PRICE,
+            SEED_ANSWER_CHOICE_3PRICE,
+            SEED_TIMESTAMP_CHOICE_3PRICE,
+            "2026-06-18 09:00:00",
+        ),
     ]:
         design = _make_choice_design(price_levels, seed_design)
         _save_design(design, HERE / f"design_choice_{tag}.csv")

@@ -7,6 +7,7 @@
 - 3人分の選択が実回答と一致すること
 を確認する。
 """
+
 import importlib.util
 import sys
 from pathlib import Path
@@ -39,21 +40,27 @@ N_ALTS = 3
 
 # 実回答から手作業で確認した正解（alt_id: 製品A=1, 製品B=2, 製品C=3）。
 # choice_set_id は回答者1の設問1〜6 → 1〜6、回答者2 → 7〜12、回答者3 → 13〜18。
+# fmt: off
+# 1行 = 1回答者。行末コメントとの対応が崩れるため整形しない。
 EXPECTED_CHOSEN_ALT = {
     1: 2, 2: 3, 3: 3, 4: 3, 5: 1, 6: 2,        # 回答者1
     7: 1, 8: 3, 9: 3, 10: 3, 11: 2, 12: 2,     # 回答者2
     13: 1, 14: 2, 15: 2, 16: 1, 17: 2, 18: 1,  # 回答者3
 }
+# fmt: on
 
 # Google Forms 版の正解表（同じ design・choice_labels で照合する）。
 # 回答者1: Q1=A, Q2=B, Q3=B, Q4=C, Q5=B, Q6=A
 # 回答者2: Q1=B, Q2=C, Q3=C, Q4=B, Q5=B, Q6=A
 # 回答者3: Q1=B, Q2=A, Q3=C, Q4=A, Q5=A, Q6=B
+# fmt: off
+# 1行 = 1回答者。行末コメントとの対応が崩れるため整形しない。
 EXPECTED_CHOSEN_ALT_GOOGLE = {
     1: 1, 2: 2, 3: 2, 4: 3, 5: 2, 6: 1,        # 回答者1
     7: 2, 8: 3, 9: 3, 10: 2, 11: 2, 12: 1,     # 回答者2
     13: 2, 14: 1, 15: 3, 16: 1, 17: 1, 18: 2,  # 回答者3
 }
+# fmt: on
 
 
 @pytest.fixture(scope="module")
@@ -75,7 +82,13 @@ def test_real_forms_runs_and_shape(design):
     assert len(df) == N_RESP * N_SETS * N_ALTS == 54
     # 出力列：respondent_id, choice_set_id, alt, choice + 属性列
     assert list(df.columns) == [
-        "respondent_id", "choice_set_id", "alt", "choice", "price", "os", "camera"
+        "respondent_id",
+        "choice_set_id",
+        "alt",
+        "choice",
+        "price",
+        "os",
+        "camera",
     ]
     # (b) choice の合計 = 3 × 6 = 18（各回答者×設問でちょうど1つ choice=1）
     assert df["choice"].sum() == N_RESP * N_SETS == 18
@@ -89,11 +102,7 @@ def test_real_forms_choices_match_answer_key(design):
     """(d) 3人分の選択が実回答の正解表と一致する。"""
     df = pcc.forms_to_data(str(RESPONSES), design, LABELS, forms="microsoft")
 
-    chosen = (
-        df[df["choice"] == 1]
-        .set_index("choice_set_id")["alt"]
-        .to_dict()
-    )
+    chosen = df[df["choice"] == 1].set_index("choice_set_id")["alt"].to_dict()
     assert chosen == EXPECTED_CHOSEN_ALT
 
 
@@ -146,15 +155,20 @@ def test_real_forms_pipeline_to_encode(design):
 # Google Forms（CSV・BOMなしUTF-8）版
 # ---------------------------------------------------------------------------
 
+
 def test_google_forms_runs_and_shape(design):
     """Google Forms の CSV（BOMなしUTF-8）が同じ design・labels で変換できる。"""
-    df = pcc.forms_to_data(
-        str(GOOGLE_RESPONSES), design, LABELS, forms="google"
-    )
+    df = pcc.forms_to_data(str(GOOGLE_RESPONSES), design, LABELS, forms="google")
     # 出力54行（3人 × 6設問 × 3代替案）、列も Microsoft 版と同じ
     assert len(df) == N_RESP * N_SETS * N_ALTS == 54
     assert list(df.columns) == [
-        "respondent_id", "choice_set_id", "alt", "choice", "price", "os", "camera"
+        "respondent_id",
+        "choice_set_id",
+        "alt",
+        "choice",
+        "price",
+        "os",
+        "camera",
     ]
     # choice 合計 = 18、各 choice_set_id でちょうど1つ choice=1、choice_set_id は 18 通り
     assert df["choice"].sum() == N_RESP * N_SETS == 18
@@ -164,9 +178,7 @@ def test_google_forms_runs_and_shape(design):
 
 def test_google_forms_choices_match_answer_key(design):
     """Google 版の選択が正解表と一致する（【設問N】接頭辞の有無に依存しない）。"""
-    df = pcc.forms_to_data(
-        str(GOOGLE_RESPONSES), design, LABELS, forms="google"
-    )
+    df = pcc.forms_to_data(str(GOOGLE_RESPONSES), design, LABELS, forms="google")
     chosen = df[df["choice"] == 1].set_index("choice_set_id")["alt"].to_dict()
     assert chosen == EXPECTED_CHOSEN_ALT_GOOGLE
 

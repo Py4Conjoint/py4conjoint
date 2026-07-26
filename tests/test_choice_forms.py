@@ -3,6 +3,7 @@
 Microsoft Forms（.xlsx）/ Google Forms（.csv）の模擬回答ファイルを
 tmp_path に生成して変換を検証する。
 """
+
 import sys
 from pathlib import Path
 
@@ -41,7 +42,7 @@ def _make_microsoft_xlsx(path, answers, extra_cols=None):
     if extra_cols:
         data.update(extra_cols)
     for q in range(N_SETS):
-        data[f"Q{q+1}. どの製品を選びますか？"] = [a[q] for a in answers]
+        data[f"Q{q + 1}. どの製品を選びますか？"] = [a[q] for a in answers]
     pd.DataFrame(data).to_excel(path, index=False)
 
 
@@ -49,13 +50,14 @@ def _make_google_csv(path, answers):
     n = len(answers)
     data = {"タイムスタンプ": ["2026/06/01 10:00"] * n}
     for q in range(N_SETS):
-        data[f"Q{q+1}. どの製品を選びますか？"] = [a[q] for a in answers]
+        data[f"Q{q + 1}. どの製品を選びますか？"] = [a[q] for a in answers]
     pd.DataFrame(data).to_csv(path, index=False, encoding="utf-8-sig")
 
 
 # ---------------------------------------------------------------------------
 # 正常系
 # ---------------------------------------------------------------------------
+
 
 def test_microsoft_happy_path(tmp_path, design):
     answers = [
@@ -69,8 +71,14 @@ def test_microsoft_happy_path(tmp_path, design):
 
     # 形状：2回答者 × 4設問 × 3代替案
     assert len(df) == 2 * N_SETS * N_ALTS
-    assert list(df.columns) == ["respondent_id", "choice_set_id", "alt", "choice",
-                                "price", "brand"]
+    assert list(df.columns) == [
+        "respondent_id",
+        "choice_set_id",
+        "alt",
+        "choice",
+        "price",
+        "brand",
+    ]
     # choice_set_id は回答者×設問の通し番号（1〜8）、各 choice_set_id に3行
     assert sorted(df["choice_set_id"].unique()) == list(range(1, 9))
     assert (df.groupby("choice_set_id").size() == N_ALTS).all()
@@ -101,9 +109,7 @@ def test_respondent_cols(tmp_path, design):
     ]
     f = tmp_path / "responses.xlsx"
     _make_microsoft_xlsx(f, answers, extra_cols={"性別": ["男", "女"]})
-    df = pcc.forms_to_data(
-        str(f), design, LABELS, respondent_cols={"性別": "gender"}
-    )
+    df = pcc.forms_to_data(str(f), design, LABELS, respondent_cols={"性別": "gender"})
     assert "gender" in df.columns
     assert set(df.loc[df["respondent_id"] == 1, "gender"]) == {"男"}
     assert set(df.loc[df["respondent_id"] == 2, "gender"]) == {"女"}
@@ -112,10 +118,7 @@ def test_respondent_cols(tmp_path, design):
 def test_end_to_end_encode_fit(tmp_path, design):
     """forms_to_data → encode → fit がそのまま流れることを確認する。"""
     rng = np.random.default_rng(0)
-    answers = [
-        [f"製品{rng.choice(LABELS)}" for _ in range(N_SETS)]
-        for _ in range(30)
-    ]
+    answers = [[f"製品{rng.choice(LABELS)}" for _ in range(N_SETS)] for _ in range(30)]
     f = tmp_path / "responses.xlsx"
     _make_microsoft_xlsx(f, answers)
     df = pcc.forms_to_data(str(f), design, LABELS)
@@ -132,6 +135,7 @@ def test_end_to_end_encode_fit(tmp_path, design):
 # ---------------------------------------------------------------------------
 # エラー・警告
 # ---------------------------------------------------------------------------
+
 
 def test_n_sets_mismatch_error(tmp_path):
     """設問数と design の n_sets が一致しない場合はエラー。"""

@@ -3,6 +3,7 @@
 - 旧API名（pc.fit など）へのアクセスが日本語の AttributeError になること
 - __version__ や rating サブパッケージなど正当な属性は通ること
 """
+
 import re
 import sys
 from importlib.metadata import PackageNotFoundError

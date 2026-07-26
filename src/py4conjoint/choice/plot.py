@@ -17,6 +17,7 @@ choice 版は **ダミーコーディング（0/1）** を使うため、基準�
 常に 0 になる。:func:`plot_partworth` では基準水準（係数0）も明示的に
 表示し、各係数が「基準水準との差」であることを視覚的に確認できる。
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
@@ -39,6 +40,7 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 # 公開API
 # ---------------------------------------------------------------------------
+
 
 def plot_importance(
     result: "ChoiceConjointResult",
@@ -144,28 +146,34 @@ def plot_partworth(
     for attr, cols in groups.items():
         # 各非基準水準（係数 = 基準との効用差）
         for c in cols:
-            level = c[len(attr) + 1:] if c.startswith(f"{attr}_") else c
-            rows.append({
-                "attribute": attr,
-                "level": level,
-                "partworth": float(result.params[c]),
-                "is_ref": False,
-            })
+            level = c[len(attr) + 1 :] if c.startswith(f"{attr}_") else c
+            rows.append(
+                {
+                    "attribute": attr,
+                    "level": level,
+                    "partworth": float(result.params[c]),
+                    "is_ref": False,
+                }
+            )
         # 基準水準（ダミーコーディングでは効用 0）
-        rows.append({
-            "attribute": attr,
-            "level": _reference_level_label(result, attr),
-            "partworth": 0.0,
-            "is_ref": True,
-        })
+        rows.append(
+            {
+                "attribute": attr,
+                "level": _reference_level_label(result, attr),
+                "partworth": 0.0,
+                "is_ref": True,
+            }
+        )
     # 数値（連続）変数は係数をそのまま表示（基準水準は無い）
     for c in numeric_cols:
-        rows.append({
-            "attribute": c,
-            "level": "（1単位あたり）",
-            "partworth": float(result.params[c]),
-            "is_ref": False,
-        })
+        rows.append(
+            {
+                "attribute": c,
+                "level": "（1単位あたり）",
+                "partworth": float(result.params[c]),
+                "is_ref": False,
+            }
+        )
 
     df_pw = pd.DataFrame(rows)
     # 表示順：属性ごとに固める。属性内では値の小さい順
@@ -176,7 +184,8 @@ def plot_partworth(
     ]
 
     return _draw_partworth(
-        ax, df_pw,
+        ax,
+        df_pw,
         xlabel="部分効用（基準水準との差）",
         title=title,
         show_zero_line=show_zero_line,
@@ -255,6 +264,7 @@ def plot_wtp(
 # ---------------------------------------------------------------------------
 # 内部ヘルパー
 # ---------------------------------------------------------------------------
+
 
 def _group_columns(
     result: "ChoiceConjointResult",

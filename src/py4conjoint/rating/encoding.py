@@ -22,6 +22,7 @@ encoding.py
 * 生成される列名はデフォルトで ``{属性名}_{インデックス}`` の形式（例：``price_0``, ``camera_0``）。
   ``encode()`` の ``suffix_map`` 引数で任意の名前に変更できる。元の列はそのまま残す。
 """
+
 from __future__ import annotations
 
 import warnings
@@ -33,6 +34,7 @@ import pandas as pd
 # ---------------------------------------------------------------------------
 # 公開API
 # ---------------------------------------------------------------------------
+
 
 def encode(
     df: pd.DataFrame,
@@ -354,7 +356,11 @@ def auto_reference_levels(
         levels = _unique_levels(df[col])
         if pd.api.types.is_numeric_dtype(df[col]):
             ref = max(levels) if col in price_cols else min(levels)
-            reason = "数値・価格列なので最大値" if col in price_cols else "数値列なので最小値"
+            reason = (
+                "数値・価格列なので最大値"
+                if col in price_cols
+                else "数値列なので最小値"
+            )
         else:
             # 文字列としてソートして先頭
             ref = sorted(levels, key=str)[0]
@@ -375,6 +381,7 @@ def auto_reference_levels(
 # ---------------------------------------------------------------------------
 # 内部ヘルパー
 # ---------------------------------------------------------------------------
+
 
 def _unique_levels(s: pd.Series) -> List[Any]:
     """

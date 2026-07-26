@@ -9,6 +9,7 @@
 
 を検証する。
 """
+
 import sys
 import warnings
 from contextlib import contextmanager
@@ -28,6 +29,7 @@ ATTRS = {"price": [100, 150, 200], "brand": ["A社", "B社", "C社"]}
 # ---------------------------------------------------------------------------
 # design_signature: 順序違いは別署名、完全に同一なら同じ署名
 # ---------------------------------------------------------------------------
+
 
 def test_signature_differs_when_level_order_changes():
     """水準の順序を変えると、同じ seed でも署名が変わる。"""
@@ -90,9 +92,9 @@ def test_signature_ignores_pandas_index_column(tmp_path):
     """
     design = pcc.design_choice_sets(ATTRS, n_sets=4, n_alts=3, seed=42)
     csv = tmp_path / "design_with_index.csv"
-    design.to_csv(csv)                       # index=False を付け忘れたケース
+    design.to_csv(csv)  # index=False を付け忘れたケース
     loaded = pd.read_csv(csv)
-    assert "Unnamed: 0" in loaded.columns    # 行番号列が混入している
+    assert "Unnamed: 0" in loaded.columns  # 行番号列が混入している
     assert pcc.design_signature(loaded) == pcc.design_signature(design)
 
 
@@ -116,6 +118,7 @@ def test_signature_independent_of_numpy_scalar_types():
 # forms_to_data: 署名を出力に引き継ぐ
 # ---------------------------------------------------------------------------
 
+
 def _make_responses_xlsx(path, n_resp=3, n_sets=4, seed=0):
     rng = np.random.default_rng(seed)
     data = {
@@ -126,7 +129,7 @@ def _make_responses_xlsx(path, n_resp=3, n_sets=4, seed=0):
         "Name": [""] * n_resp,
     }
     for q in range(n_sets):
-        data[f"Q{q+1}. どの製品を選びますか？"] = list(
+        data[f"Q{q + 1}. どの製品を選びますか？"] = list(
             rng.choice(["製品A", "製品B", "製品C"], size=n_resp)
         )
     pd.DataFrame(data).to_excel(path, index=False)
@@ -150,7 +153,7 @@ def test_forms_to_data_signature_matches_survey_design(tmp_path):
     f = tmp_path / "responses.xlsx"
     _make_responses_xlsx(f, n_sets=4)
 
-    analysis_design = pd.read_csv(csv)            # 分析時は読み込むだけ
+    analysis_design = pd.read_csv(csv)  # 分析時は読み込むだけ
     df = pcc.forms_to_data(str(f), analysis_design, ["A", "B", "C"])
     # 出力の署名 == アンケート作成に使った design の署名
     assert df.attrs["design_signature"] == pcc.design_signature(survey_design)
@@ -164,7 +167,7 @@ def test_forms_to_data_warns_and_drops_index_column(tmp_path):
     """
     survey_design = pcc.design_choice_sets(ATTRS, n_sets=4, n_alts=3, seed=42)
     csv = tmp_path / "design.csv"
-    survey_design.to_csv(csv)                     # index=False を付け忘れたケース
+    survey_design.to_csv(csv)  # index=False を付け忘れたケース
 
     f = tmp_path / "responses.xlsx"
     _make_responses_xlsx(f, n_sets=4)
@@ -183,6 +186,7 @@ def test_forms_to_data_warns_and_drops_index_column(tmp_path):
 # ---------------------------------------------------------------------------
 # 構造チェック（案B）: 崩れた design を日本語エラーで弾く
 # ---------------------------------------------------------------------------
+
 
 def test_forms_to_data_rejects_uneven_alt_counts(tmp_path):
     """選択セットごとの代替案数が揃っていない design はエラー（日本語）。"""
@@ -212,6 +216,7 @@ def test_forms_to_data_rejects_non_contiguous_alt_ids(tmp_path):
 # ---------------------------------------------------------------------------
 # 正常ケースでは警告を一切出さない（過剰検出しない）
 # ---------------------------------------------------------------------------
+
 
 @contextmanager
 def warnings_as_errors():

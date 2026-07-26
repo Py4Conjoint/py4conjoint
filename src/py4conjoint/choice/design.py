@@ -20,6 +20,7 @@ rating 版（:mod:`py4conjoint.rating.design`）と対称的なAPIを提供す�
 ...     n_sets=8, n_alts=3,
 ... )
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -43,6 +44,7 @@ from ..rating.analysis import (
 # ---------------------------------------------------------------------------
 # 公開API: design_choice_sets 関数
 # ---------------------------------------------------------------------------
+
 
 def design_choice_sets(
     attributes: Dict[str, List[Any]],
@@ -255,8 +257,8 @@ def design_choice_sets(
     out.attrs["n_candidates"] = N
     out.attrs["design_signature"] = design_signature(out)
     out.attrs["auto_balance"] = {
-        "n_candidates": int(n_candidates),   # 評価した候補設計の数
-        "n_warnings": int(best_warn),        # 選ばれた設計の警告数
+        "n_candidates": int(n_candidates),  # 評価した候補設計の数
+        "n_warnings": int(best_warn),  # 選ばれた設計の警告数
         "cv_sum": round(float(best_cv), 6),  # 全属性の CV の合計
     }
     return out
@@ -265,6 +267,7 @@ def design_choice_sets(
 # ---------------------------------------------------------------------------
 # 公開API: design_signature 関数
 # ---------------------------------------------------------------------------
+
 
 def design_signature(design: pd.DataFrame) -> str:
     """
@@ -316,14 +319,14 @@ def design_signature(design: pd.DataFrame) -> str:
             "  design_choice_sets() の出力、または設計CSV を渡してください。"
         )
 
-    id_cols = [c for c in ("version", "choice_set_id", "alt_id")
-               if c in design.columns]
+    id_cols = [c for c in ("version", "choice_set_id", "alt_id") if c in design.columns]
     # 属性列は順序の影響を受けないよう、列名で並べてから値を取り込む。
     # pandas の行番号列（Unnamed: 0 など。index=False を付けずに保存した
     # CSV の痕跡）は設計の中身ではないため署名から除外する。これにより
     # index 付きで保存してしまった CSV でも、元の設計と署名が一致する。
     attr_cols = sorted(
-        c for c in design.columns
+        c
+        for c in design.columns
         if c not in id_cols and not _is_index_artifact_column(c)
     )
     cols = id_cols + attr_cols
@@ -351,6 +354,7 @@ def design_signature(design: pd.DataFrame) -> str:
 # 公開API: check_design 関数
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class ChoiceDesignCheckResult:
     """
@@ -374,6 +378,7 @@ class ChoiceDesignCheckResult:
     diagnostics : List[Diagnostic]
         検出された問題の一覧。
     """
+
     balance: pd.DataFrame
     chi2: pd.DataFrame
     overlap: pd.DataFrame
@@ -389,13 +394,14 @@ class ChoiceDesignCheckResult:
         lines.append("\n【独立性（χ²統計量）】（自由度に対して小さいほど独立）")
         lines.append(_df_to_string_cjk(self.chi2, index=False))
 
-        lines.append("\n【セット内オーバーラップ】"
-                     "（全代替案が同じ水準になる設問の割合。小さいほど良い）")
+        lines.append(
+            "\n【セット内オーバーラップ】"
+            "（全代替案が同じ水準になる設問の割合。小さいほど良い）"
+        )
         lines.append(_df_to_string_cjk(self.overlap, index=True))
 
         diags = sorted(
-            self.diagnostics,
-            key=lambda d: SEVERITY_ORDER.get(d.severity, 99)
+            self.diagnostics, key=lambda d: SEVERITY_ORDER.get(d.severity, 99)
         )
         if diags:
             lines.append("\n【警告】")
@@ -423,8 +429,7 @@ class ChoiceDesignCheckResult:
                     "recommendation": d.recommendation,
                 }
                 for d in sorted(
-                    self.diagnostics,
-                    key=lambda d: SEVERITY_ORDER.get(d.severity, 99)
+                    self.diagnostics, key=lambda d: SEVERITY_ORDER.get(d.severity, 99)
                 )
             ]
         )
@@ -478,7 +483,8 @@ def check_design(
     # 既定では ID 列と pandas の行番号列（Unnamed: 0 など）を除いた全列を
     # 属性とみなす（attributes を明示指定した場合はそのまま尊重する）
     attrs = attributes or [
-        c for c in design.columns
+        c
+        for c in design.columns
         if c not in id_cols and not _is_index_artifact_column(c)
     ]
     missing = [a for a in attrs if a not in design.columns]
@@ -510,6 +516,7 @@ def check_design(
 # ---------------------------------------------------------------------------
 # 公開API: suggest_n_respondents 関数
 # ---------------------------------------------------------------------------
+
 
 def suggest_n_respondents(
     attributes: Dict[str, List[Any]],
@@ -612,21 +619,25 @@ def suggest_n_respondents(
     for attr, lvs in attributes.items():
         c = len(lvs)
         n_req = math.ceil(500 * c / (n_sets * n_alts))
-        rows.append({
-            "属性": attr,
-            "水準数": c,
-            "必要回答者数（目安）": n_req,
-        })
+        rows.append(
+            {
+                "属性": attr,
+                "水準数": c,
+                "必要回答者数（目安）": n_req,
+            }
+        )
     result = pd.DataFrame(rows).set_index("属性")
 
     c_max = int(result["水準数"].max())
     n_required = int(result["必要回答者数（目安）"].max())
-    result.attrs.update({
-        "n_required": n_required,
-        "c_max": c_max,
-        "n_sets": n_sets,
-        "n_alts": n_alts,
-    })
+    result.attrs.update(
+        {
+            "n_required": n_required,
+            "c_max": c_max,
+            "n_sets": n_sets,
+            "n_alts": n_alts,
+        }
+    )
 
     print(
         f"Johnson-Orme の経験則: n ≥ 500 × c / (t × a)\n"
@@ -640,6 +651,7 @@ def suggest_n_respondents(
 # ---------------------------------------------------------------------------
 # 内部ヘルパー（auto_balance）
 # ---------------------------------------------------------------------------
+
 
 def _assign_random_design(
     full: pd.DataFrame,
@@ -695,6 +707,7 @@ def _is_better_design(
 # 内部ヘルパー（rating/design.py・rating/analysis.py から流用）
 # ---------------------------------------------------------------------------
 
+
 def _check_balance(design: pd.DataFrame, attrs: List[str]) -> pd.DataFrame:
     """各属性の水準出現頻度と変動係数（CV）を計算する。"""
     rows = []
@@ -708,14 +721,16 @@ def _check_balance(design: pd.DataFrame, attrs: List[str]) -> pd.DataFrame:
             label = "○"
         else:
             label = "△"
-        rows.append({
-            "属性": attr,
-            "水準数": len(counts),
-            "最大出現": int(counts.max()),
-            "最小出現": int(counts.min()),
-            "CV": round(cv, 4),
-            "評価": label,
-        })
+        rows.append(
+            {
+                "属性": attr,
+                "水準数": len(counts),
+                "最大出現": int(counts.max()),
+                "最小出現": int(counts.min()),
+                "CV": round(cv, 4),
+                "評価": label,
+            }
+        )
     return pd.DataFrame(rows).set_index("属性")
 
 
@@ -726,7 +741,7 @@ def _check_chi2(design: pd.DataFrame, attrs: List[str]) -> pd.DataFrame:
     """
     rows = []
     for i, a1 in enumerate(attrs):
-        for a2 in attrs[i + 1:]:
+        for a2 in attrs[i + 1 :]:
             ct = pd.crosstab(design[a1], design[a2]).values.astype(float)
             row_sum = ct.sum(axis=1, keepdims=True)
             col_sum = ct.sum(axis=0, keepdims=True)
@@ -746,14 +761,16 @@ def _check_chi2(design: pd.DataFrame, attrs: List[str]) -> pd.DataFrame:
                 label = "○"
             else:
                 label = "△"
-            rows.append({
-                "属性1": a1,
-                "属性2": a2,
-                "χ²": round(chi2_val, 4),
-                "自由度": dof,
-                "χ²/自由度": round(ratio, 4),
-                "評価": label,
-            })
+            rows.append(
+                {
+                    "属性1": a1,
+                    "属性2": a2,
+                    "χ²": round(chi2_val, 4),
+                    "自由度": dof,
+                    "χ²/自由度": round(ratio, 4),
+                    "評価": label,
+                }
+            )
     return pd.DataFrame(rows)
 
 
@@ -780,11 +797,13 @@ def _check_overlap(design: pd.DataFrame, attrs: List[str]) -> pd.DataFrame:
             label = "○"
         else:
             label = "△"
-        rows.append({
-            "属性": attr,
-            "オーバーラップ率": round(rate, 4),
-            "評価": label,
-        })
+        rows.append(
+            {
+                "属性": attr,
+                "オーバーラップ率": round(rate, 4),
+                "評価": label,
+            }
+        )
     return pd.DataFrame(rows).set_index("属性")
 
 
@@ -802,64 +821,74 @@ def _design_diagnostics(
     for attr, row in balance_df.iterrows():
         cv = row["CV"]
         if cv > 0.3:
-            diags.append(Diagnostic(
-                severity="大",
-                category=f"balance_{attr}",
-                message=f"属性 '{attr}' の水準出現頻度が偏っています（CV={cv:.3f}）。",
-                recommendation=(
-                    "設問数（n_sets）またはバージョン数（n_versions）を増やすか、"
-                    "seed を変えて再生成してください。"
-                ),
-            ))
+            diags.append(
+                Diagnostic(
+                    severity="大",
+                    category=f"balance_{attr}",
+                    message=f"属性 '{attr}' の水準出現頻度が偏っています（CV={cv:.3f}）。",
+                    recommendation=(
+                        "設問数（n_sets）またはバージョン数（n_versions）を増やすか、"
+                        "seed を変えて再生成してください。"
+                    ),
+                )
+            )
         elif cv > 0.15:
-            diags.append(Diagnostic(
-                severity="中",
-                category=f"balance_{attr}",
-                message=f"属性 '{attr}' の水準出現頻度にやや偏りがあります（CV={cv:.3f}）。",
-                recommendation="可能であれば設問数・バージョン数を増やしてください。",
-            ))
+            diags.append(
+                Diagnostic(
+                    severity="中",
+                    category=f"balance_{attr}",
+                    message=f"属性 '{attr}' の水準出現頻度にやや偏りがあります（CV={cv:.3f}）。",
+                    recommendation="可能であれば設問数・バージョン数を増やしてください。",
+                )
+            )
 
     # χ²チェック（rating 版と同じ閾値）
     for _, row in chi2_df.iterrows():
         ratio = row["χ²/自由度"]
         a1, a2 = row["属性1"], row["属性2"]
         if ratio > 1.0:
-            diags.append(Diagnostic(
-                severity="中",
-                category=f"chi2_{a1}_{a2}",
-                message=(
-                    f"'{a1}' と '{a2}' のχ²/自由度={ratio:.3f} > 1.0 で、"
-                    "独立性が低い可能性があります。"
-                ),
-                recommendation="2属性の水準組み合わせが偏っていないか確認してください。",
-            ))
+            diags.append(
+                Diagnostic(
+                    severity="中",
+                    category=f"chi2_{a1}_{a2}",
+                    message=(
+                        f"'{a1}' と '{a2}' のχ²/自由度={ratio:.3f} > 1.0 で、"
+                        "独立性が低い可能性があります。"
+                    ),
+                    recommendation="2属性の水準組み合わせが偏っていないか確認してください。",
+                )
+            )
 
     # オーバーラップチェック
     for attr, row in overlap_df.iterrows():
         rate = row["オーバーラップ率"]
         if rate > 0.5:
-            diags.append(Diagnostic(
-                severity="大",
-                category=f"overlap_{attr}",
-                message=(
-                    f"属性 '{attr}' は設問の {rate:.0%} で全代替案が同じ水準に"
-                    "なっています。これらの設問では当該属性が選択の判断材料に"
-                    "ならず、推定精度が大きく下がります。"
-                ),
-                recommendation=(
-                    "n_alts を減らす、水準数を増やす、または seed を変えて"
-                    "再生成し、オーバーラップ率を下げてください。"
-                ),
-            ))
+            diags.append(
+                Diagnostic(
+                    severity="大",
+                    category=f"overlap_{attr}",
+                    message=(
+                        f"属性 '{attr}' は設問の {rate:.0%} で全代替案が同じ水準に"
+                        "なっています。これらの設問では当該属性が選択の判断材料に"
+                        "ならず、推定精度が大きく下がります。"
+                    ),
+                    recommendation=(
+                        "n_alts を減らす、水準数を増やす、または seed を変えて"
+                        "再生成し、オーバーラップ率を下げてください。"
+                    ),
+                )
+            )
         elif rate > 0.3:
-            diags.append(Diagnostic(
-                severity="中",
-                category=f"overlap_{attr}",
-                message=(
-                    f"属性 '{attr}' のセット内オーバーラップ率がやや高いです"
-                    f"（{rate:.0%}）。"
-                ),
-                recommendation="設問数を増やすか seed を変えて再生成を検討してください。",
-            ))
+            diags.append(
+                Diagnostic(
+                    severity="中",
+                    category=f"overlap_{attr}",
+                    message=(
+                        f"属性 '{attr}' のセット内オーバーラップ率がやや高いです"
+                        f"（{rate:.0%}）。"
+                    ),
+                    recommendation="設問数を増やすか seed を変えて再生成を検討してください。",
+                )
+            )
 
     return diags

@@ -35,6 +35,7 @@ rating（評点型）と対称的なAPIを提供する。
     result.market_share(products_df)     # 市場シェア予測
     result.warnings()                    # 落とし穴チェック
 """
+
 from __future__ import annotations
 
 # バージョン（親パッケージと共通）

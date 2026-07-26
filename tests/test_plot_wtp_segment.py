@@ -7,6 +7,7 @@
 - price_segment で特定区間だけ描ける。
 - rating / choice で挙動が完全に揃う。
 """
+
 import sys
 from pathlib import Path
 
@@ -35,6 +36,7 @@ def _close_figures():
 # 人工データ
 # ---------------------------------------------------------------------------
 
+
 def _simulate_cbc(price_util, brand_util, *, n_sets=30_000, n_alts=3, seed=0):
     rng = np.random.default_rng(seed)
     prices = np.array(sorted(price_util))
@@ -48,8 +50,14 @@ def _simulate_cbc(price_util, brand_util, *, n_sets=30_000, n_alts=3, seed=0):
         p /= p.sum()
         ch = (rng.random() < p.cumsum()).argmax()
         for j in range(n_alts):
-            rows.append({"choice_set_id": t, "choice": int(j == ch),
-                         "price": int(pr[j]), "brand": br[j]})
+            rows.append(
+                {
+                    "choice_set_id": t,
+                    "choice": int(j == ch),
+                    "price": int(pr[j]),
+                    "brand": br[j],
+                }
+            )
     return pd.DataFrame(rows)
 
 
@@ -62,41 +70,60 @@ def _make_rating_3level(seed=42, n_resp=30):
                 u = 4.0 + {6: 1.5, 8: 1.0, 10: -1.5}[price]
                 u += 0.7 if os == "apple" else -0.7
                 u += rng.normal(0, 0.3)
-                rows.append({"respondent_id": r, "rating": int(np.clip(round(u), 1, 7)),
-                             "price": price, "os": os})
+                rows.append(
+                    {
+                        "respondent_id": r,
+                        "rating": int(np.clip(round(u), 1, 7)),
+                        "price": price,
+                        "os": os,
+                    }
+                )
     return pd.DataFrame(rows)
 
 
 @pytest.fixture(scope="module")
 def choice_3level():
-    df = _simulate_cbc({6: 0.0, 8: -0.3, 10: -1.6}, {"A": 0.0, "B": 0.6},
-                       n_sets=40_000, seed=5)
+    df = _simulate_cbc(
+        {6: 0.0, 8: -0.3, 10: -1.6}, {"A": 0.0, "B": 0.6}, n_sets=40_000, seed=5
+    )
     dc = pcc.encode(df, reference_levels={"price": 6, "brand": "A"})
-    return pcc.fit(dc, choice="choice", choice_set_id_col="choice_set_id",
-                   encoded_columns=["price_8", "price_10", "brand_B"],
-                   price_col="price")
+    return pcc.fit(
+        dc,
+        choice="choice",
+        choice_set_id_col="choice_set_id",
+        encoded_columns=["price_8", "price_10", "brand_B"],
+        price_col="price",
+    )
 
 
 @pytest.fixture(scope="module")
 def choice_2level():
-    df = _simulate_cbc({6: 0.0, 10: -1.2}, {"A": 0.0, "B": 0.5},
-                       n_sets=30_000, seed=3)
+    df = _simulate_cbc({6: 0.0, 10: -1.2}, {"A": 0.0, "B": 0.5}, n_sets=30_000, seed=3)
     dc = pcc.encode(df, reference_levels={"price": 10, "brand": "A"})
-    return pcc.fit(dc, choice="choice", choice_set_id_col="choice_set_id",
-                   encoded_columns=["price_6", "brand_B"], price_col="price")
+    return pcc.fit(
+        dc,
+        choice="choice",
+        choice_set_id_col="choice_set_id",
+        encoded_columns=["price_6", "brand_B"],
+        price_col="price",
+    )
 
 
 @pytest.fixture(scope="module")
 def rating_3level():
     df = _make_rating_3level(seed=42, n_resp=30)
-    dc = pc.encode(df, reference_levels={"price": 10, "os": "android"},
-                   suffix_map={"price": ["low", "mid"]})
+    dc = pc.encode(
+        df,
+        reference_levels={"price": 10, "os": "android"},
+        suffix_map={"price": ["low", "mid"]},
+    )
     return pc.fit(dc, price_col="price")
 
 
 # ---------------------------------------------------------------------------
 # 2水準：属性ごとに1本（単一区間）
 # ---------------------------------------------------------------------------
+
 
 def test_choice_2level_single_bars(choice_2level):
     ax = choice_2level.plot_wtp(price_unit="ドル")
@@ -112,6 +139,7 @@ def test_choice_2level_single_bars(choice_2level):
 # ---------------------------------------------------------------------------
 # 3水準：価格区間ごとのグループ化棒グラフ
 # ---------------------------------------------------------------------------
+
 
 def test_choice_3level_grouped_bars(choice_3level):
     ax = choice_3level.plot_wtp()
@@ -140,6 +168,7 @@ def test_rating_3level_grouped_bars(rating_3level):
 # ---------------------------------------------------------------------------
 # 棒の高さが wtp(method="segment") の表と一致する
 # ---------------------------------------------------------------------------
+
 
 def test_choice_grouped_heights_match_table(choice_3level):
     w = choice_3level.wtp(method="segment")
@@ -170,6 +199,7 @@ def test_choice_single_widths_match_table(choice_2level):
 # method="linear"：単一棒・タイトルに「線形近似」
 # ---------------------------------------------------------------------------
 
+
 def test_choice_linear_single_bar_and_title(choice_3level):
     ax = choice_3level.plot_wtp(method="linear")
     # 線形近似は属性ごとに1本（brand_B のみ）
@@ -188,6 +218,7 @@ def test_rating_linear_single_bar_and_title(rating_3level):
 # price_segment：特定区間だけ描く
 # ---------------------------------------------------------------------------
 
+
 def test_choice_price_segment_filter_plot(choice_3level):
     ax = choice_3level.plot_wtp(price_segment="8〜10")
     # 1属性 × 1区間 = 1本
@@ -200,6 +231,7 @@ def test_choice_price_segment_filter_plot(choice_3level):
 # ---------------------------------------------------------------------------
 # 既存の Axes を渡せる
 # ---------------------------------------------------------------------------
+
 
 def test_grouped_accepts_ax(choice_3level):
     fig, my_ax = plt.subplots()
