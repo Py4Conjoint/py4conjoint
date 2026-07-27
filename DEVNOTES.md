@@ -50,3 +50,60 @@
   `det_of` が約28%。制約なし側には `_is_balanced` がないので、
   操作2の追加は素直に det の計算回数を増やす）
 - 改善幅の実測（どの構成でどれだけ det(X'X) が上がるか）
+
+---
+
+## choice 側の判定基準がまだ直書きである
+
+- 記録日：2026-07-27
+- 対象：`src/py4conjoint/choice/design.py` の `_check_balance()` /
+  `_check_overlap()` / `_design_diagnostics()`
+- 状態：**未着手**（今回は統一しない）
+
+### 現状
+
+rating 側は `check_design` の判定基準を
+`src/py4conjoint/rating/analysis.py` の定数（`_BALANCE_CV_MAJOR` /
+`_BALANCE_CV_MINOR` / `_CORRELATION_ABS_MAJOR` / `_CORRELATION_ABS_MINOR`）と
+ヘルパー（`_balance_severity()` / `_correlation_severity()` /
+`_cross_attribute_pairs()`）に一元化した。
+
+choice 側は同じ数値が関数の中に直書きのまま残っている。
+
+| 場所 | 数値 | 意味 |
+|---|---|---|
+| `_check_balance()` | `cv < 0.05` / `cv < 0.15` | 表示ラベル ◎/○/△ の境界 |
+| `_check_overlap()` | `rate < 0.1` / `rate < 0.3` | 表示ラベル ◎/○/△ の境界 |
+| `_design_diagnostics()` | `cv > 0.3` / `cv > 0.15` | バランス警告 [大] / [中] |
+| `_design_diagnostics()` | `rate > 0.5` / `rate > 0.3` | オーバーラップ警告 [大] / [中] |
+
+（行番号は変動するので関数名で示す。）
+
+### 確認済み：`rate` は rating の `|r|` とは別の概念
+
+`rate` は**セット内オーバーラップ率**（同一選択セット内の全代替案が同じ水準を
+持つ設問の割合）であり、rating の属性間相関 `|r|` とは測っているものが違う。
+閾値 0.5 / 0.3 が一致しているのは偶然である。**同じ数値だからという理由で
+束ねてはならない。**
+
+なお rating 側にも同種の偶然がある（`_check_balance()` の表示ラベル境界
+`0.15` と警告基準 `_BALANCE_CV_MINOR` の一致）。そちらは該当箇所に
+コメントを入れて注意を残した。
+
+### 向き合うべき論点（choice に案A・案Cを展開するとき）
+
+1. 統一するかどうか。判定基準が rating と choice で**同じであるべきか
+   どうか自体が設計判断**である。設計の作り方（プロファイル単位 ／
+   選択セット単位）が違うので、同じ CV でも意味が同じとは限らない。
+2. 統一するなら、どこに置くか。両サブパッケージで共有する（共通モジュールに
+   出す）のか、それぞれが自分の定数を持つのか。公開 API の対称性は保つ
+   一方で、**基準の値まで連動させるべきかは別問題**。
+3. `cv > 0.3` / `cv > 0.15` は rating と choice で偶然一致しているのか、
+   意図して揃えたのかが不明。統一の前にどちらなのかを決める必要がある。
+
+### なぜ今やらないか
+
+案A・案C（`suggest_n_profiles` / `check_design` に auto_balance の存在を
+伝える変更）は rating 側だけの作業であり、choice 側の直書きは今回の変更で
+生じたものではない。上記1〜3は設計判断を伴うため、rating 側の実装が
+固まってから改めて扱う。

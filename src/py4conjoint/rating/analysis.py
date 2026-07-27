@@ -55,6 +55,67 @@ def _is_index_artifact_column(name: object) -> bool:
 SEVERITY_ORDER = {"大": 0, "中": 1, "小": 2}
 
 
+# ---------------------------------------------------------------------------
+# check_design の判定基準
+# ---------------------------------------------------------------------------
+#
+# ここが check_design の判定基準の **唯一の定義** である。
+# 水準バランス（CV）と属性間相関（|r|）について、どの値から警告を出し、
+# 重大度をどちらにするかを決めているのはこの4つの定数と、下の
+# _balance_severity() / _correlation_severity() / _cross_attribute_pairs()
+# だけである。_design_diagnostics() も、警告に添える案内文のために
+# 「この n では回避できるか」を調べる処理も、すべてここを通る。
+#
+# したがって閾値を変えるときはここだけを変えればよく、警告の有無と、
+# その警告に添える案内が食い違うことはない。判定を別の場所に書き写すと、
+# 片方だけ変わっても例外も警告も出ないまま矛盾するので、必ずここを使うこと。
+
+# 水準出現頻度の変動係数 CV の閾値
+_BALANCE_CV_MAJOR = 0.3  # これを超えたら [大]
+_BALANCE_CV_MINOR = 0.15  # これを超えたら [中]
+
+# 効果コーディング後の属性間相関 |r| の閾値
+_CORRELATION_ABS_MAJOR = 0.5  # これを超えたら [大]
+_CORRELATION_ABS_MINOR = 0.3  # これを超えたら [中]
+
+
+def _balance_severity(cv: float) -> Optional[str]:
+    """水準出現頻度の CV から重大度を返す。警告を出さないなら None。"""
+    if cv > _BALANCE_CV_MAJOR:
+        return "大"
+    if cv > _BALANCE_CV_MINOR:
+        return "中"
+    return None
+
+
+def _correlation_severity(abs_r: float) -> Optional[str]:
+    """属性間相関の |r| から重大度を返す。警告を出さないなら None。"""
+    if abs_r > _CORRELATION_ABS_MAJOR:
+        return "大"
+    if abs_r > _CORRELATION_ABS_MINOR:
+        return "中"
+    return None
+
+
+def _cross_attribute_pairs(columns: List[str]) -> List[tuple]:
+    """相関を評価する符号化列のペア（属性をまたぐものだけ）を返す。
+
+    3水準以上の属性は ``"attr__1"`` のような列名になる。同一属性内の
+    ペアは符号化の都合で必ず相関するため、評価の対象から除く。
+    このルールを再現し忘れると、3水準以上の属性を含む設計は
+    どれも「相関あり」と判定されてしまう。
+    """
+    pairs = []
+    for col1 in columns:
+        for col2 in columns:
+            if col1 >= col2:
+                continue
+            if col1.split("__")[0] == col2.split("__")[0]:
+                continue
+            pairs.append((col1, col2))
+    return pairs
+
+
 @dataclass(frozen=True)
 class Diagnostic:
     """
@@ -1896,6 +1957,9 @@ def _check_balance(profiles: pd.DataFrame, attrs: List[str]) -> pd.DataFrame:
         counts = profiles[attr].value_counts()
         mean = counts.mean()
         cv = float(counts.std() / mean) if mean > 0 else float("inf")
+        # この 0.15 は表示ラベル（◎/○/△）の境界であり、警告の基準
+        # （_BALANCE_CV_MINOR）とは別物。値が一致しているのは偶然なので、
+        # どちらかを動かすときは他方を巻き添えにしないこと。
         if cv < 0.05:
             label = "◎"
         elif cv < 0.15:
@@ -2028,62 +2092,61 @@ def _design_diagnostics(
             )
         )
 
-    # バランスチェック
+    # バランスチェック（閾値の定義は _balance_severity）
     for attr, row in balance_df.iterrows():
         cv = row["CV"]
-        if cv > 0.3:
-            diags.append(
-                Diagnostic(
-                    severity="大",
-                    category=f"balance_{attr}",
-                    message=f"属性 '{attr}' の水準出現頻度が偏っています（CV={cv:.3f}）。",
-                    recommendation="各水準の出現回数を均等にしてください（バランスの良いデザイン）。",
-                )
+        severity = _balance_severity(cv)
+        if severity is None:
+            continue
+        if severity == "大":
+            message = f"属性 '{attr}' の水準出現頻度が偏っています（CV={cv:.3f}）。"
+            recommendation = (
+                "各水準の出現回数を均等にしてください（バランスの良いデザイン）。"
             )
-        elif cv > 0.15:
-            diags.append(
-                Diagnostic(
-                    severity="中",
-                    category=f"balance_{attr}",
-                    message=f"属性 '{attr}' の水準出現頻度にやや偏りがあります（CV={cv:.3f}）。",
-                    recommendation="可能であれば各水準の出現回数を均等に近づけてください。",
-                )
+        else:
+            message = (
+                f"属性 '{attr}' の水準出現頻度にやや偏りがあります（CV={cv:.3f}）。"
             )
+            recommendation = "可能であれば各水準の出現回数を均等に近づけてください。"
+        diags.append(
+            Diagnostic(
+                severity=severity,
+                category=f"balance_{attr}",
+                message=message,
+                recommendation=recommendation,
+            )
+        )
 
-    # 相関チェック（同一属性の符号化列ペアはスキップ）
+    # 相関チェック（評価するペアと閾値の定義は
+    # _cross_attribute_pairs / _correlation_severity）
     if not corr_df.empty:
-        for col1 in corr_df.columns:
-            for col2 in corr_df.columns:
-                if col1 >= col2:
-                    continue
-                # 3水準以上の属性は "attr__i" という列名になる。同一属性内のペアは無視。
-                if col1.split("__")[0] == col2.split("__")[0]:
-                    continue
-                r = abs(float(corr_df.loc[col1, col2]))
-                if r > 0.5:
-                    diags.append(
-                        Diagnostic(
-                            severity="大",
-                            category=f"correlation_{col1}_{col2}",
-                            message=(
-                                f"'{col1}' と '{col2}' の相関が高いです（|r|={r:.3f}）。"
-                                "パラメータの独立推定が困難になります。"
-                            ),
-                            recommendation=(
-                                "プロファイルの組み合わせを見直し、"
-                                "2属性の水準が独立に出現するよう設計してください。"
-                            ),
-                        )
-                    )
-                elif r > 0.3:
-                    diags.append(
-                        Diagnostic(
-                            severity="中",
-                            category=f"correlation_{col1}_{col2}",
-                            message=f"'{col1}' と '{col2}' の相関がやや高いです（|r|={r:.3f}）。",
-                            recommendation="可能であればプロファイルの組み合わせを調整してください。",
-                        )
-                    )
+        for col1, col2 in _cross_attribute_pairs(list(corr_df.columns)):
+            r = abs(float(corr_df.loc[col1, col2]))
+            severity = _correlation_severity(r)
+            if severity is None:
+                continue
+            if severity == "大":
+                message = (
+                    f"'{col1}' と '{col2}' の相関が高いです（|r|={r:.3f}）。"
+                    "パラメータの独立推定が困難になります。"
+                )
+                recommendation = (
+                    "プロファイルの組み合わせを見直し、"
+                    "2属性の水準が独立に出現するよう設計してください。"
+                )
+            else:
+                message = f"'{col1}' と '{col2}' の相関がやや高いです（|r|={r:.3f}）。"
+                recommendation = (
+                    "可能であればプロファイルの組み合わせを調整してください。"
+                )
+            diags.append(
+                Diagnostic(
+                    severity=severity,
+                    category=f"correlation_{col1}_{col2}",
+                    message=message,
+                    recommendation=recommendation,
+                )
+            )
 
     # χ²チェック
     for _, row in chi2_df.iterrows():
