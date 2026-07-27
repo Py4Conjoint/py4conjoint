@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import math
 import warnings
+from itertools import combinations as _itertools_combinations
 from itertools import product as _itertools_product
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -37,6 +38,7 @@ def design_profiles(
     n_profiles: int,
     *,
     reference_levels: Optional[Dict[str, object]] = None,
+    auto_balance: bool = False,
     n_starts: int = 10,
     seed: Optional[int] = None,
     profile_id_prefix: str = "P",
@@ -69,12 +71,30 @@ def design_profiles(
         ``encode()`` に渡す値と同じ辞書を渡すと、設計の最適化基準と
         符号化基準が一致する。
 
+    auto_balance : bool, default False
+        ``True`` にすると、**水準バランスを満たす設計の中で** det(X'X) を
+        最大化する。既定の ``False`` では従来どおり、バランスを考慮せずに
+        det(X'X) を最大化する（挙動は完全に同じ）。
+
+        ここでいうバランスとは「すべての属性について、水準の出現回数の
+        最大と最小の差が 1 以下」であること。``suggest_n_profiles()`` が
+        推奨する n_profiles で設計を作ると ``check_design()`` が [大] の
+        バランス警告を出すことがあり、その逃げ道として使う。
+
+        バランスを優先する分、det(X'X) は制約なしの最良解より小さくなり
+        うる（どれだけ失ったかは ``df.attrs["auto_balance"]`` で確認できる。
+        後述の Notes を参照）。
+
     n_starts : int, default 10
         ランダム初期化の試行回数。
         多いほど良い解を見つけやすいが実行時間も増える。
+        ``auto_balance=True`` で総当たり経路に入る場合（Notes 参照）は
+        結果に影響しない。
 
     seed : int, optional
         乱数シード（再現性のため）。
+        ``n_starts`` と同じく、総当たり経路では結果に影響しない
+        （総当たりは決定的で、同点は候補の並び順で最初のものを採る）。
 
     profile_id_prefix : str, default "P"
         プロファイル ID の接頭辞（"P1", "P2", ...）。
@@ -92,6 +112,37 @@ def design_profiles(
         ``df.attrs["n_candidates"]`` — 完全交差の候補数 N。
 
         ``df.attrs["det_xpx"]`` — 選択された設計の det(X'X)。
+
+        ``auto_balance=True`` のときは、さらに探索の来歴が入る::
+
+            df.attrs["auto_balance"] = {
+                "method": "exhaustive",          # 探索の方法（後述）
+                "balanced": True,                # バランス制約を満たせたか
+                "det_xpx": 768.0,                # 返した設計の det(X'X)
+                "det_xpx_unconstrained": 1024.0, # 制約なしで最適化した場合
+                "det_ratio": 0.75,               # 前者 ÷ 後者
+            }
+
+        ``"det_ratio"`` は「バランスを取ったことで失う精度の割合」を表す。
+        1.0 なら、バランスを満たしたまま制約なしの最良解に到達している。
+        バランスを満たせなかった場合（``"balanced"`` が ``False``）は
+        比を定義できないので ``None`` になる。
+
+        ``"method"`` が ``"exchange"`` のときは、比が 1.0 をわずかに
+        超えることがある。この経路では ``"det_xpx_unconstrained"`` 自体も
+        発見的探索の到達点であり、真の最適値ではないため、制約付きの探索が
+        そちらを上回ることがあるからである。
+
+        ``"method"`` は次の3つのいずれか。
+
+        * ``"exhaustive"``   … 総当たり。厳密解。
+        * ``"exchange"``     … 制約付き交換アルゴリズム。**発見的探索**で、
+          最良解である保証はない。
+        * ``"full_factorial"`` … n_profiles が完全交差の候補数 N と等しく、
+          完全交差をそのまま返した場合（定義上つねに完全バランス）。
+
+        ``"det_ratio"`` を読むときは ``"method"`` も見ること。厳密解の比か、
+        探索の到達点の比かで意味が変わるため。
 
     Raises
     ------
@@ -126,6 +177,48 @@ def design_profiles(
 
     ここで p はパラメータ数（切片含む）。完全交差を選んだ場合は 1.0 になる。
     n_profiles が少ないほど小さくなる。
+
+    **auto_balance の探索方法（厳密解と発見的探索の境界）**
+
+    候補の選び方の総数 C(N, n_profiles) が
+    ``_EXHAUSTIVE_MAX_COMBINATIONS``（= 1,000,000）以下なら **総当たり** で
+    厳密解を求め、それを超えるときは制約付き交換アルゴリズム（発見的探索）に
+    切り替える。この定数は速度の閾値であると同時に、**返る解が厳密解か
+    発見的探索かの境界**でもある。どちらだったかは
+    ``df.attrs["auto_balance"]["method"]`` で判別できる。
+
+    値は実測に基づく（バッチ化した numpy 実装）::
+
+        C(N, n) = 184,756  （N=20, n=10）→ 約 0.25 秒
+        C(N, n) = 1,000,000            → 約 1.5 秒
+        C(N, n) = 2,704,156（N=24, n=12）→ 約 4.0 秒
+
+    授業で使う規模（N ≤ 20 程度）はほぼ総当たり側に入る。実行時間の許容度が
+    変わったら、この定数を見直せばよい。
+
+    交換アルゴリズム側（``"exchange"``）の実測は次のとおり（既定の
+    ``n_starts=10``）。総当たりと違って C(N, n) ではなく、候補数 N と
+    n_profiles でおおよそ決まる::
+
+        N =  72, n = 18（4×3×3×2）      → 約 0.3 秒
+        N = 288, n = 30（4×4×3×3×2）    → 約 4 秒
+        N = 360, n = 40（5×4×3×3×2）    → 約 7 秒
+        N = 720, n = 60（5×4×3×3×2×2）  → 約 28 秒
+
+    所要時間は ``n_starts`` にほぼ比例する。時間がかかりすぎる場合は
+    ``n_starts`` を下げればよい（そのぶん解の質は落ちうる）。
+
+    **auto_balance が保証するのは水準バランスだけ（直交性は別）**
+
+    ``auto_balance=True`` の契約は「水準の出現回数の最大と最小の差が 1 以下」
+    のみで、**属性間の相関（直交性）については何も約束しない**。両者は別の
+    基準であり、バランスを満たしていても属性間に相関が残ることがある。
+    たとえば 3水準を含む属性構成で 6 プロファイルを選ぶ設計では、
+    構造的に |r| = 1/3 程度の相関が避けられない。
+
+    そのため ``auto_balance=True`` で作った設計に対しても、
+    ``check_design()`` が相関について警告を出すことはある。バランス警告が
+    消えたのに相関の指摘が残るのは矛盾ではない。
 
     Examples
     --------
@@ -209,7 +302,18 @@ def design_profiles(
         out.attrs["d_efficiency"] = 1.0
         out.attrs["n_candidates"] = N
         X_full = _build_effect_matrix(df_full, attribute_levels, ref_lvls)
-        out.attrs["det_xpx"] = float(np.linalg.det(X_full.T @ X_full))
+        det_all = float(np.linalg.det(X_full.T @ X_full))
+        out.attrs["det_xpx"] = det_all
+        if auto_balance:
+            # 完全交差はすべての水準が同じ回数だけ現れるので、定義上つねに
+            # バランスを満たす。制約なしの最良解とも一致する。
+            out.attrs["auto_balance"] = {
+                "method": "full_factorial",
+                "balanced": True,
+                "det_xpx": det_all,
+                "det_xpx_unconstrained": det_all,
+                "det_ratio": 1.0,
+            }
         return out
 
     # 効果コーディング設計行列（N × p）
@@ -218,16 +322,23 @@ def design_profiles(
     # D 相対効率の基準値: det(X_full'X_full)
     det_full = float(np.linalg.det(X_full.T @ X_full))
 
-    # D 最適交換アルゴリズムを n_starts 回実行
-    rng = np.random.default_rng(seed)
-    best_indices: List[int] = []
-    best_det = -np.inf
+    balance_info: Optional[Dict[str, Any]] = None
 
-    for _ in range(n_starts):
-        indices, det_val = _d_exchange_run(X_full, n_profiles, rng)
-        if det_val > best_det:
-            best_det = det_val
-            best_indices = indices
+    if auto_balance:
+        best_indices, balance_info = _search_balanced_design(
+            X_full, df_full, attribute_levels, n_profiles, n_starts, seed
+        )
+    else:
+        # D 最適交換アルゴリズムを n_starts 回実行
+        rng = np.random.default_rng(seed)
+        best_indices = []
+        best_det = -np.inf
+
+        for _ in range(n_starts):
+            indices, det_val = _d_exchange_run(X_full, n_profiles, rng)
+            if det_val > best_det:
+                best_det = det_val
+                best_indices = indices
 
     # 結果の整形（行インデックス順でソート）
     sorted_idx = sorted(best_indices)
@@ -246,6 +357,9 @@ def design_profiles(
     out.attrs["d_efficiency"] = float(d_eff)
     out.attrs["n_candidates"] = N
     out.attrs["det_xpx"] = det_sel
+
+    if balance_info is not None:
+        out.attrs["auto_balance"] = balance_info
 
     return out
 
@@ -469,6 +583,361 @@ def _build_effect_matrix(
             )
             cols.append(col)
     return np.column_stack(cols)
+
+
+# ---------------------------------------------------------------------------
+# 内部ヘルパー（auto_balance）
+# ---------------------------------------------------------------------------
+
+# 総当たりに切り替える上限（候補の選び方の総数 C(N, n_profiles)）。
+# 速度の閾値であると同時に、厳密解か発見的探索かの境界でもある。
+# 根拠となる実測値は design_profiles の Notes を参照。
+_EXHAUSTIVE_MAX_COMBINATIONS = 1_000_000
+
+# 総当たりを何件ずつまとめて numpy に流すか（メモリと速度の兼ね合い）
+_EXHAUSTIVE_BATCH = 20_000
+
+# 制約付き探索で、バランスを満たす初期解を作り直す上限回数
+_BALANCED_INIT_TRIES = 50
+
+
+def _level_indicator(
+    df_full: pd.DataFrame,
+    attribute_levels: Dict[str, List[Any]],
+) -> "Tuple[np.ndarray, List[Tuple[int, int]]]":
+    """
+    水準の出現回数を数えるための 0/1 行列（N × 全水準数）と、属性ごとの列範囲を返す。
+
+    選んだ行の和をとれば、各水準が何回現れたかがそのまま得られる。
+    """
+    cols: List[np.ndarray] = []
+    spans: List[Tuple[int, int]] = []
+    start = 0
+    for attr, levels in attribute_levels.items():
+        for lv in levels:
+            cols.append((df_full[attr] == lv).to_numpy(dtype=np.int32))
+        spans.append((start, start + len(levels)))
+        start += len(levels)
+    return np.column_stack(cols), spans
+
+
+def _level_codes(
+    df_full: pd.DataFrame,
+    attribute_levels: Dict[str, List[Any]],
+) -> "Tuple[np.ndarray, Dict[Tuple[int, ...], int]]":
+    """
+    各候補プロファイルを「属性ごとの水準番号」の配列にし、その逆引きも返す。
+
+    属性の水準だけを入れ替える操作（:func:`_balanced_exchange_run` の操作2）で、
+    入れ替えた結果のプロファイルが候補の何番目かを引くために使う。
+    """
+    cols = []
+    for attr, levels in attribute_levels.items():
+        pos = {lv: i for i, lv in enumerate(levels)}
+        cols.append(np.array([pos[v] for v in df_full[attr]], dtype=np.int64))
+    codes = np.column_stack(cols)
+    index_of = {tuple(code): i for i, code in enumerate(codes)}
+    return codes, index_of
+
+
+def _is_balanced(counts: np.ndarray, spans: "List[Tuple[int, int]]") -> bool:
+    """水準の出現回数（1次元）がすべての属性で「最大 − 最小 ≤ 1」か。"""
+    return all(counts[s:e].max() - counts[s:e].min() <= 1 for s, e in spans)
+
+
+def _unbalanced_attrs(
+    counts: np.ndarray,
+    spans: "List[Tuple[int, int]]",
+    attribute_levels: Dict[str, List[Any]],
+) -> List[str]:
+    """均等にできなかった属性の名前を返す（警告文に使う）。"""
+    names = list(attribute_levels.keys())
+    return [
+        names[a]
+        for a, (s, e) in enumerate(spans)
+        if counts[s:e].max() - counts[s:e].min() > 1
+    ]
+
+
+def _exhaustive_search(
+    X_full: np.ndarray,
+    L: np.ndarray,
+    spans: "List[Tuple[int, int]]",
+    M: int,
+) -> "Tuple[Optional[List[int]], float, List[int], float]":
+    """
+    C(N, M) 通りをすべて調べ、「制約なしの最良」と「バランス制約下の最良」を返す。
+
+    全解を漏れなく走査するので、返るのは **厳密解** である。
+    同点のときは候補の並び順（辞書順）で最初のものを採るため、結果は決定的で
+    seed に依存しない。
+
+    Returns
+    -------
+    (balanced_indices, balanced_det, best_indices, best_det)
+        balanced_indices は制約を満たす設計が1つも無ければ None。
+    """
+    N = X_full.shape[0]
+    best_idx: List[int] = []
+    best_det = -np.inf
+    bal_idx: Optional[List[int]] = None
+    bal_det = -np.inf
+
+    buf: List[Tuple[int, ...]] = []
+
+    def flush(buf_local: "List[Tuple[int, ...]]") -> None:
+        nonlocal best_idx, best_det, bal_idx, bal_det
+        idx = np.array(buf_local, dtype=np.int64)  # (B, M)
+        rows = X_full[idx]  # (B, M, p)
+        dets = np.linalg.det(np.einsum("bmp,bmq->bpq", rows, rows))  # (B,)
+
+        k = int(np.argmax(dets))
+        if float(dets[k]) > best_det:
+            best_det = float(dets[k])
+            best_idx = list(buf_local[k])
+
+        counts = L[idx].sum(axis=1)  # (B, 全水準数)
+        ok = np.ones(len(idx), dtype=bool)
+        for s, e in spans:
+            seg = counts[:, s:e]
+            ok &= (seg.max(axis=1) - seg.min(axis=1)) <= 1
+        if ok.any():
+            dets_bal = np.where(ok, dets, -np.inf)
+            kb = int(np.argmax(dets_bal))
+            if float(dets_bal[kb]) > bal_det:
+                bal_det = float(dets_bal[kb])
+                bal_idx = list(buf_local[kb])
+
+    for combo in _itertools_combinations(range(N), M):
+        buf.append(combo)
+        if len(buf) == _EXHAUSTIVE_BATCH:
+            flush(buf)
+            buf = []
+    if buf:
+        flush(buf)
+
+    return bal_idx, bal_det, best_idx, best_det
+
+
+def _balanced_initial(
+    L: np.ndarray,
+    spans: "List[Tuple[int, int]]",
+    M: int,
+    rng: np.random.Generator,
+) -> Optional[List[int]]:
+    """
+    バランスを満たす初期解を作る（貪欲法）。
+
+    候補をランダムな順に見て、「出現回数が上限 ceil(M / 水準数) を超えない」
+    ものの中から、現在の出現回数の合計が最も小さいものを選ぶ。
+    作れなければ ``_BALANCED_INIT_TRIES`` 回まで作り直し、それでも駄目なら
+    None を返す。
+    """
+    N = L.shape[0]
+    caps = np.zeros(L.shape[1], dtype=np.int64)
+    for s, e in spans:
+        caps[s:e] = -(-M // (e - s))  # ceil
+
+    for _ in range(_BALANCED_INIT_TRIES):
+        order = rng.permutation(N)
+        counts = np.zeros(L.shape[1], dtype=np.int64)
+        used = np.zeros(N, dtype=bool)
+        sel: List[int] = []
+        for _step in range(M):
+            best_i, best_key = None, None
+            for i in order:
+                if used[i] or np.any(counts + L[i] > caps):
+                    continue
+                key = int((counts * L[i]).sum())
+                if best_key is None or key < best_key:
+                    best_i, best_key = int(i), key
+            if best_i is None:
+                break
+            counts += L[best_i]
+            used[best_i] = True
+            sel.append(best_i)
+        if len(sel) == M and _is_balanced(counts, spans):
+            return sel
+    return None
+
+
+def _balanced_exchange_run(
+    X_full: np.ndarray,
+    L: np.ndarray,
+    spans: "List[Tuple[int, int]]",
+    codes: np.ndarray,
+    index_of: Dict[Tuple[int, ...], int],
+    M: int,
+    rng: np.random.Generator,
+) -> "Optional[Tuple[List[int], float]]":
+    """
+    バランスを保ったまま局所改善する 1 試行（発見的探索）。
+
+    バランスを満たす初期解から出発し、**バランスを保つ操作だけ** で
+    det(X'X) を改善していく。使う操作は次の2種類。
+
+    1. **入れ替え**：選択済みの1行を未選択の1行と交換する。
+       交換後もバランスを満たす組み合わせだけを候補にする。
+    2. **属性の交換**：選択済みの2行のあいだで、ある属性の水準だけを
+       入れ替える（例：(6, apple) と (10, android) → (10, apple) と
+       (6, android)）。どの属性の出現回数も変わらないので、バランスは
+       つねに保たれる。
+
+    操作2が必要なのは、水準数が n_profiles を割り切る「完全に均等な」
+    設計では、操作1がまったく使えなくなるためである（1行だけ入れ替えると
+    必ずどこかの水準の回数が ±1 ずれ、最大と最小の差が 2 になる）。
+    操作1だけだと、その場合は初期解から1歩も動けない。
+
+    最良解である保証はない（バランスを満たす解の近傍で局所最適）。
+    """
+    sel = _balanced_initial(L, spans, M, rng)
+    if sel is None:
+        return None
+
+    N = X_full.shape[0]
+    in_sel = np.zeros(N, dtype=bool)
+    in_sel[sel] = True
+    counts = L[sel].sum(axis=0)
+
+    def det_of(indices: List[int]) -> float:
+        rows = X_full[indices]
+        return float(np.linalg.det(rows.T @ rows))
+
+    current = det_of(sel)
+    improved = True
+    while improved:
+        improved = False
+        best_det = current * (1.0 + 1e-10)
+        best_sel: Optional[List[int]] = None
+
+        # 操作1：選択済みの1行 ↔ 未選択の1行
+        not_sel = [j for j in range(N) if not in_sel[j]]
+        for i_pos in range(M):
+            base_counts = counts - L[sel[i_pos]]
+            for j in not_sel:
+                if not _is_balanced(base_counts + L[j], spans):
+                    continue
+                cand = list(sel)
+                cand[i_pos] = j
+                d = det_of(cand)
+                if d > best_det:
+                    best_det, best_sel = d, cand
+
+        # 操作2：選択済みの2行のあいだで、1属性の水準だけを入れ替える
+        n_attrs = len(spans)
+        for a in range(M):
+            for b in range(a + 1, M):
+                code_a = codes[sel[a]]
+                code_b = codes[sel[b]]
+                for k in range(n_attrs):
+                    if code_a[k] == code_b[k]:
+                        continue  # 同じ水準なら何も変わらない
+                    new_a = code_a.copy()
+                    new_b = code_b.copy()
+                    new_a[k], new_b[k] = code_b[k], code_a[k]
+                    i_new = index_of[tuple(new_a)]
+                    j_new = index_of[tuple(new_b)]
+                    # 入れ替えた結果、他の選択済み行と重複してはいけない
+                    if in_sel[i_new] or in_sel[j_new]:
+                        continue
+                    cand = list(sel)
+                    cand[a], cand[b] = i_new, j_new
+                    d = det_of(cand)
+                    if d > best_det:
+                        best_det, best_sel = d, cand
+
+        if best_sel is not None:
+            in_sel[:] = False
+            in_sel[best_sel] = True
+            counts = L[best_sel].sum(axis=0)
+            sel = best_sel
+            current = best_det
+            improved = True
+
+    return sel, current
+
+
+def _search_balanced_design(
+    X_full: np.ndarray,
+    df_full: pd.DataFrame,
+    attribute_levels: Dict[str, List[Any]],
+    M: int,
+    n_starts: int,
+    seed: Optional[int],
+) -> "Tuple[List[int], Dict[str, Any]]":
+    """
+    バランス制約下で det(X'X) を最大化する設計を探し、来歴とともに返す。
+
+    候補の選び方の総数が ``_EXHAUSTIVE_MAX_COMBINATIONS`` 以下なら総当たり
+    （厳密解）、超えるなら制約付き交換アルゴリズム（発見的探索）を使う。
+
+    バランスを満たす設計が得られなかった場合は、警告のうえ制約なしの
+    最良解を返す（例外にはしない）。
+    """
+    N = X_full.shape[0]
+    L, spans = _level_indicator(df_full, attribute_levels)
+
+    if math.comb(N, M) <= _EXHAUSTIVE_MAX_COMBINATIONS:
+        method = "exhaustive"
+        bal_idx, bal_det, best_idx, best_det = _exhaustive_search(X_full, L, spans, M)
+    else:
+        method = "exchange"
+        rng = np.random.default_rng(seed)
+        best_idx, best_det = [], -np.inf
+        for _ in range(n_starts):
+            indices, det_val = _d_exchange_run(X_full, M, rng)
+            if det_val > best_det:
+                best_det, best_idx = det_val, indices
+
+        codes, index_of = _level_codes(df_full, attribute_levels)
+        bal_idx, bal_det = None, -np.inf
+        for _ in range(n_starts):
+            found = _balanced_exchange_run(X_full, L, spans, codes, index_of, M, rng)
+            if found is not None and found[1] > bal_det:
+                bal_idx, bal_det = found[0], found[1]
+
+    if bal_idx is None:
+        # 到達しにくい経路だが、防御的に残してある（例外にはしない）。
+        bad = _unbalanced_attrs(L[best_idx].sum(axis=0), spans, attribute_levels)
+        if method == "exhaustive":
+            reason = (
+                f"属性 {bad} で水準を均等にできる設計が存在しません"
+                "（すべての組み合わせを調べました）。"
+            )
+        else:
+            reason = (
+                f"属性 {bad} で水準を均等にできる設計を見つけられませんでした"
+                "（探索は網羅的ではないため、存在しないとは限りません）。"
+            )
+        warnings.warn(
+            f"auto_balance=True が指定されましたが、{reason}\n"
+            "  バランス制約なしの最良解を返します。\n"
+            "  n_profiles を変えると均等にできる場合があります"
+            "（各属性の水準数の公倍数に近い値が候補です）。",
+            UserWarning,
+            stacklevel=3,
+        )
+        info = {
+            "method": method,
+            "balanced": False,
+            "det_xpx": float(best_det),
+            "det_xpx_unconstrained": float(best_det),
+            # バランスを満たせなかったので比は定義しない。同じ設計を指す
+            # 2つの det の比（= 1.0）を入れると「精度の損失なし」と読めてしまい、
+            # 制約を満たせなかったことが伝わらないため None にする。
+            "det_ratio": None,
+        }
+        return best_idx, info
+
+    ratio = float(bal_det / best_det) if best_det > 0 else 0.0
+    info = {
+        "method": method,
+        "balanced": True,
+        "det_xpx": float(bal_det),
+        "det_xpx_unconstrained": float(best_det),
+        "det_ratio": ratio,
+    }
+    return bal_idx, info
 
 
 def _d_exchange_run(
