@@ -166,12 +166,26 @@ def _balance_hint(attr: str, judgment: Optional[Dict[str, Any]]) -> str:
     return _HINT_SEP.join(lines)
 
 
-def _correlation_hint(judgment: Optional[Dict[str, Any]]) -> str:
+def _correlation_hint(
+    judgment: Optional[Dict[str, Any]],
+    balance_warned: bool = False,
+    multiple_pairs: bool = False,
+) -> str:
     """相関警告に添える「この n で回避できるのか」の案内。
 
     判定は「そのペアだけ避けられるか」ではなく「**相関の指摘が1つも出ない
     設計が存在するか**」で行う。ペア単位で判定すると、避けたつもりが別の
     ペアに移るだけの場合に「回避できます」と誤って案内してしまうため。
+
+    ``balance_warned`` は、**いま調べている設計**に水準バランスの警告が
+    出ているか。「バランスを満たす設計と相関を避ける設計は別物である」と
+    書くとき、いまの設計がどちらなのかを併せて示すために使う。バランス表に
+    ◎ が並んだ直後に「その設計は水準バランスを満たしません」とだけ書くと、
+    主語がいまの設計に読めて自己矛盾に見える（実データで確認した）。
+
+    ``multiple_pairs`` は、評価対象のペア（同一属性内を除く列の組）が
+    2組以上あるか。「指摘は別のペアに移る」と書けるのはこのときだけで、
+    属性が2つで各2水準ならペアは1組しかなく、移る先が存在しない。
     """
     if judgment is None:
         return ""
@@ -184,18 +198,37 @@ def _correlation_hint(judgment: Optional[Dict[str, Any]]) -> str:
     elif not judgment["correlation_avoidable"]:
         lines = [
             f"ただし、この n（{n}）では、どのプロファイルの"
-            "組み合わせを選んでも相関の指摘は残ります",
-            "（このペアだけを 0 にすることはできますが、別のペアに移るだけです）。",
+            "組み合わせを選んでも相関の指摘は残ります。",
+        ]
+        if multiple_pairs:
+            # 「1つも出ない設計が存在しない」からの含意なので、この書き方なら
+            # ペア単位の判定をしていなくても言える（このペアを避けた設計にも、
+            # どこかのペアには必ず指摘が残る）。ペアが1組しかない構成では
+            # 移る先が存在しないので出さない。
+            lines.append(
+                "このペアの相関を下げられたとしても、指摘は別のペアに移ります。"
+            )
+        lines += [
             "n_profiles を変えると解消する場合があります。",
             "auto_balance=True は水準バランス専用で、相関は解消しません。",
         ]
     elif not judgment["both_avoidable"]:
         lines = [
-            f"この n（{n}）でも相関の指摘が出ない組み合わせは"
-            "存在しますが、その設計は水準バランスを満たしません。",
-            "この n ではバランスと直交性の両方を満たす設計が存在しないためです。",
-            "どちらを優先するか選ぶか、n_profiles を変えてください。",
+            "相関の指摘が出ない組み合わせも存在しますが、"
+            "それらはいずれも水準バランスを満たしません",
+            f"（この n（{n}）には、バランスと直交性の両方を満たす設計が"
+            "存在しないためです）。",
         ]
+        if balance_warned:
+            lines.append(
+                "いまの設計は、どちらの指摘も出ている状態です。",
+            )
+        else:
+            lines.append(
+                "いまの設計は水準バランスのほうを満たしていて、"
+                "そのぶん相関が残っている状態です。",
+            )
+        lines.append("どちらを優先するか選ぶか、n_profiles を変えてください。")
     else:
         lines = [
             f"この n（{n}）にはバランスと直交性の両方を満たす設計が存在しますが、",
@@ -225,8 +258,9 @@ class Diagnostic:
         対処方法の提案（日本語）。
     hint : str, default ""
         対処方法に添える補足（日本語）。``check_design`` の水準バランス・
-        属性間相関の警告で、「この n では回避できるのか」を調べた結果を
-        入れる。調べていない警告では空文字列。
+        属性間相関の警告では「この n では回避できるのか」を調べた結果が、
+        プロファイル数の警告（``few_profiles``）では飽和設計の意味が入る。
+        補足のない警告では空文字列。
 
         1文ずつ改行で区切って持ち、字下げは付けない。表示側で整形する
         （:meth:`hint_indented` / :meth:`hint_oneline`）。
@@ -2238,6 +2272,28 @@ def _design_diagnostics(
                 ),
             )
         )
+    elif n_profiles == k_params:
+        # n = p はちょうど最小限（飽和設計）。n = p+1 とは意味が違うので分ける。
+        # プロファイルごとの平均評点を残差なしで再現してしまうため、回答者を
+        # 増やしても当てはまりの悪さや交互作用を検出する自由度は生まれない。
+        diags.append(
+            Diagnostic(
+                severity="中",
+                category="few_profiles",
+                message=(
+                    f"プロファイル数（{n_profiles}）がパラメータ数（{k_params}）と"
+                    "同じで、ちょうど最小限です（飽和設計）。"
+                ),
+                recommendation="プロファイルを追加してください。",
+                hint=_HINT_SEP.join(
+                    [
+                        "飽和設計はプロファイルごとの平均評点をそのまま再現するため、",
+                        "回答者を何人増やしても、交互作用やモデルの当てはまりの悪さを"
+                        "検出する自由度は生まれません。",
+                    ]
+                ),
+            )
+        )
     elif n_profiles < k_params + 2:
         diags.append(
             Diagnostic(
@@ -2260,6 +2316,11 @@ def _design_diagnostics(
         from . import _feasibility
 
         judgment = _feasibility.judge_avoidability(profiles, attrs)
+
+    # 相関の案内文で「いまの設計はバランスのほうを満たしている」と書けるかの判断に使う
+    balance_warned = any(
+        _balance_severity(row["CV"]) is not None for _attr, row in balance_df.iterrows()
+    )
 
     # バランスチェック（閾値の定義は _balance_severity）
     for attr, row in balance_df.iterrows():
@@ -2290,7 +2351,10 @@ def _design_diagnostics(
     # 相関チェック（評価するペアと閾値の定義は
     # _cross_attribute_pairs / _correlation_severity）
     if not corr_df.empty:
-        for col1, col2 in _cross_attribute_pairs(list(corr_df.columns)):
+        pairs = _cross_attribute_pairs(list(corr_df.columns))
+        # 「指摘は別のペアに移る」と書けるのは、移る先が実在するときだけ
+        multiple_pairs = len(pairs) >= 2
+        for col1, col2 in pairs:
             r = abs(float(corr_df.loc[col1, col2]))
             severity = _correlation_severity(r)
             if severity is None:
@@ -2315,7 +2379,7 @@ def _design_diagnostics(
                     category=f"correlation_{col1}_{col2}",
                     message=message,
                     recommendation=recommendation,
-                    hint=_correlation_hint(judgment),
+                    hint=_correlation_hint(judgment, balance_warned, multiple_pairs),
                 )
             )
 

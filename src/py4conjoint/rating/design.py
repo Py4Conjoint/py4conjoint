@@ -384,7 +384,8 @@ def suggest_n_profiles(
 
     あわせて **要約を印字する**（choice の ``suggest_n_respondents()`` と
     揃えた振る舞い）。印字するのは (1) 推奨値の根拠となる3基準、(2) 推奨された
-    n_profiles で「水準バランスと D 最適性が両立するか」の2点。**返り値の
+    n_profiles で「水準バランスと D 最適性が両立するか」、(3) 水準バランスと
+    属性間相関の指摘がどちらも出ない n はどれか、の3点。**返り値の
     DataFrame は印字の有無にかかわらず同じ**である。
 
     Parameters
@@ -474,6 +475,21 @@ def suggest_n_profiles(
     別の、より低い値を使う。授業で使う規模はこの上限に収まる。
     判定するのは表に現れる**相異なる推奨値**についてのみで、
     表の全行について計算はしない（同じ n が繰り返されるため）。
+
+    **どの n なら指摘が出ないか**
+
+    続けて、``p`` から ``min(N, max_burden)`` までの n を実際に走査し、
+    **水準バランスと属性間相関の指摘がどちらも出ない n** を列挙する
+    （``design_profiles(..., auto_balance=True)`` で作った場合）。
+    「n_profiles を変えると両立する場合があります」だけでは増やせばよいのか
+    減らせばよいのかが分からないため、実際に調べて示す。答えが推奨値より
+    小さい側にあることもある。
+
+    走査するのも C(N, n) が ``_REPORT_MAX_COMBINATIONS`` 以下の n だけで、
+    超える n は調べずにその旨を印字する（1つも調べられない場合はこの行を
+    印字しない）。なお、プロファイル数が少ないときの警告
+    （``check_design`` の ``few_profiles``）はバランス・相関とは
+    **別のカテゴリ**なので、列挙した n に残る場合はそれを明示する。
 
     Examples
     --------
@@ -593,8 +609,16 @@ def suggest_n_profiles(
         f"  → 推奨 n_profiles: {joined}"
         f"（3基準の最大値を min(N={N}, max_burden={max_burden}) で上限制限）"
     )
+    # 「指摘が出ないのはどの n か」を先に調べる。これを印字するなら、
+    # _balance_note の「n_profiles を変えると両立する場合があります」は
+    # 方向を示さないぶん誤解を招くので出さない。
+    clean_note = _clean_n_note(attribute_levels, m_min, N, max_burden)
     for m_rec in recommended:
-        print(_balance_note(attribute_levels, m_rec, N))
+        print(
+            _balance_note(attribute_levels, m_rec, N, show_change_hint=not clean_note)
+        )
+    if clean_note:
+        print(clean_note)
 
     return result
 
@@ -609,8 +633,28 @@ def _format_ratio(ratio: float) -> str:
     return f"{ratio * 100:.4g}%"
 
 
+# 候補の組み合わせ数をカンマ区切りで書く上限。これを超えたら指数表記にする。
+# C(N, n) は桁数が急に増える（8属性×4水準の N = 65,536 から 25 個選ぶ場合は
+# 96桁、カンマ区切りだと127文字になり画面を1行で埋める）。授業で使う規模は
+# 10桁程度までなので、そこはカンマ区切りのまま読める。
+_COUNT_COMMA_MAX = 10**12
+
+
+def _format_count(count: int) -> str:
+    """組み合わせ数を「17,383,860」または「約 1.66×10^95」（96桁）の形で表す。"""
+    if count < _COUNT_COMMA_MAX:
+        return f"{count:,}"
+    exponent = len(str(count)) - 1
+    mantissa = count / 10**exponent
+    return f"約 {mantissa:.2f}×10^{exponent}"
+
+
 def _balance_note(
-    attribute_levels: Dict[str, List[Any]], n_profiles: int, n_candidates: int
+    attribute_levels: Dict[str, List[Any]],
+    n_profiles: int,
+    n_candidates: int,
+    *,
+    show_change_hint: bool = True,
 ) -> str:
     """推奨 n_profiles で「バランスと D 最適性が両立するか」の注記を作る。
 
@@ -619,13 +663,19 @@ def _balance_note(
     ときは判定しない。``suggest_n_profiles()`` は即座に返る関数であり、
     待たされる理由が利用者に見えないため。``design_profiles`` 自身が総当たり
     に入る上限（``_EXHAUSTIVE_MAX_COMBINATIONS``）とは別の、より低い値である。
+
+    ``show_change_hint=False`` にすると「n_profiles を変えると両立する場合が
+    あります」の行を落とす。どの n なら指摘が出ないかを :func:`_clean_n_note`
+    が具体的に列挙するときは、方向を示さないこの行は不要（かえって
+    「増やせばよい」と読まれる）ため。
     """
     n_comb = math.comb(n_candidates, n_profiles)
     if n_comb > _REPORT_MAX_COMBINATIONS:
         return (
             f"    ※ n = {n_profiles} でバランスと D 最適性が両立するかは"
             "確認していません\n"
-            f"       （候補の組み合わせが {n_comb:,} 通りあり、判定に時間がかかるため）。\n"
+            f"       （候補の組み合わせが {_format_count(n_comb)} 通りあり、"
+            "判定に時間がかかるため）。\n"
             "       design_profiles(..., auto_balance=True) を実行し、\n"
             '       df.attrs["auto_balance"]["det_ratio"] で確認できます。'
         )
@@ -653,13 +703,147 @@ def _balance_note(
             "満たします\n"
             "       （auto_balance=True を指定する必要はありません）。"
         )
-    return (
+    note = (
         f"    ※ n = {n_profiles} では、D 最適な設計は必ずどこかの水準が"
         "不均衡になります。\n"
         "       design_profiles(..., auto_balance=True) ならバランスは取れますが、\n"
-        f"       det(X'X) は制約なしの {_format_ratio(info['det_ratio'])} に下がります。\n"
-        "       n_profiles を変えると両立する場合があります。"
+        f"       det(X'X) は制約なしの {_format_ratio(info['det_ratio'])} に下がります。"
     )
+    if show_change_hint:
+        note += "\n       n_profiles を変えると両立する場合があります。"
+    return note
+
+
+def _scan_range(
+    m_min: int, n_upper: int, n_candidates: int
+) -> "tuple[List[int], List[int]]":
+    """走査する n と、候補が多すぎて調べない n を返す（どちらも m_min 以上 n_upper 以下）。
+
+    C(N, n) は n = N/2 まで増え、そこから減る。増える側では上限を超えた時点で
+    それより大きい n（N/2 まで）もすべて超えるので、そこで打ち切る。減る側は
+    大きいほうから見て同様に打ち切る。**全部の n について C を計算しない**の
+    が要点で、N が大きいと C の計算自体が重い（例：8属性×4水準なら
+    N = 65,536）。
+    """
+    mid = n_candidates // 2
+    scanned: List[int] = []
+    skipped: List[int] = []
+
+    # 増える側（m_min 〜 N/2）
+    low_end = min(n_upper, mid)
+    n = m_min
+    while n <= low_end:
+        if math.comb(n_candidates, n) > _REPORT_MAX_COMBINATIONS:
+            skipped.extend(range(n, low_end + 1))
+            break
+        scanned.append(n)
+        n += 1
+
+    # 減る側（N/2 より大きい側を、大きいほうから）
+    high_end = max(mid, m_min - 1)
+    n = n_upper
+    while n > high_end:
+        if math.comb(n_candidates, n) > _REPORT_MAX_COMBINATIONS:
+            skipped.extend(range(high_end + 1, n + 1))
+            break
+        scanned.append(n)
+        n -= 1
+
+    return sorted(scanned), sorted(skipped)
+
+
+def _clean_n_note(
+    attribute_levels: Dict[str, List[Any]],
+    m_min: int,
+    n_candidates: int,
+    max_burden: int,
+) -> str:
+    """水準バランスと属性間相関の指摘がどちらも出ない n を、走査して列挙する。
+
+    「n_profiles を変えると両立する場合があります」だけでは、増やせばよいのか
+    減らせばよいのかが分からない。判定の仕組みはすでにあるので、実際に調べて
+    どの n かを示す（答えが推奨値より小さい側にあることもある）。
+
+    走査する範囲は m_min（= p）から ``min(N, max_burden)`` まで。推奨値と同じ
+    上限制限をかけるのは、そこを超える n は推奨されず、示しても使えないため。
+    さらに C(N, n) が ``_REPORT_MAX_COMBINATIONS`` を超える n は調べない
+    （:func:`_scan_range`）。1つも調べられなければ空文字列を返す
+    （呼び出し側は何も印字しない）。
+
+    判定は ``design_profiles(..., auto_balance=True)`` が実際に返す設計を
+    ``check_design`` と同じ基準で評価して行う。「存在する」ではなく
+    「その関数で作れば出ない」と言えることを確かめるため。
+
+    プロファイル数についての警告（``check_design`` の ``few_profiles``）は
+    バランス・相関とは別のカテゴリなので、「この n なら警告が消えます」と
+    まとめずに、残るものとして分けて示す。
+    """
+    # 循環 import（design → _feasibility → design）を避けるため呼び出し時に読み込む。
+    from . import _feasibility
+
+    n_upper = max(m_min, min(n_candidates, max_burden))
+    scanned, skipped = _scan_range(m_min, n_upper, n_candidates)
+    if not scanned:
+        return ""
+
+    clean: List[int] = []
+    for n in scanned:
+        judged = _feasibility._auto_balance_warnings(attribute_levels, n)
+        if judged is None:
+            continue
+        warned_balance, warned_correlation = judged
+        if not any(warned_balance.values()) and not warned_correlation:
+            clean.append(n)
+
+    skip_note = ""
+    if skipped:
+        skip_note = (
+            f"\n       （n = {_join_ints(skipped)} は候補の組み合わせが "
+            f"{_REPORT_MAX_COMBINATIONS:,} 通りを超えるため調べていません。）"
+        )
+
+    if not clean:
+        return (
+            f"    ※ n = {scanned[0]}〜{scanned[-1]} のどれで作っても、水準バランスと"
+            "属性間相関の指摘が\n"
+            "       どちらも出ない設計は見つかりませんでした。" + skip_note
+        )
+
+    note = (
+        "    ※ 水準バランスと属性間相関の指摘がどちらも出ないのは "
+        f"n = {_join_ints(clean)} です\n"
+        "       （design_profiles(..., auto_balance=True) で作った場合）。"
+    )
+    few = [n for n in clean if n < m_min + 2]
+    if few:
+        note += (
+            f"\n       ただし n = {_join_ints(few)} では、プロファイル数が"
+            f"パラメータ数（{m_min}）に対して\n"
+            "       少ないという指摘は残ります"
+            "（バランス・相関とは別のカテゴリの警告です）。"
+        )
+    return note + skip_note
+
+
+def _join_ints(values: List[int]) -> str:
+    """整数の並びを「4, 8」の形にする。3つ以上連続する部分は「12〜18」とまとめる。"""
+    if not values:
+        return ""
+    # 連続する部分（run）に分ける
+    runs: List[List[int]] = [[values[0]]]
+    for v in values[1:]:
+        if v == runs[-1][-1] + 1:
+            runs[-1].append(v)
+        else:
+            runs.append([v])
+
+    parts: List[str] = []
+    for run in runs:
+        if len(run) >= 3:
+            parts.append(f"{run[0]}〜{run[-1]}")
+        else:
+            parts.extend(str(v) for v in run)
+    return ", ".join(parts)
 
 
 def _build_effect_matrix(
