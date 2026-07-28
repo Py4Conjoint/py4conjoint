@@ -116,6 +116,95 @@ def _cross_attribute_pairs(columns: List[str]) -> List[tuple]:
     return pairs
 
 
+def _has_balance_or_correlation_warning(
+    balance_df: pd.DataFrame, corr_df: pd.DataFrame
+) -> bool:
+    """バランスまたは相関の警告が1つでも出るか（判定を走らせるかの判断に使う）。"""
+    for _attr, row in balance_df.iterrows():
+        if _balance_severity(row["CV"]) is not None:
+            return True
+    if not corr_df.empty:
+        for col1, col2 in _cross_attribute_pairs(list(corr_df.columns)):
+            if _correlation_severity(abs(float(corr_df.loc[col1, col2]))) is not None:
+                return True
+    return False
+
+
+# 案内文（hint）の行区切り。
+#
+# hint は recommendation とは別のフィールドとして持ち、字下げは付けずに
+# 改行だけで区切る。表示側で整形する（テキスト表示は各行を字下げし、
+# warnings() が返す DataFrame では1行に連結する）。recommendation に
+# 連結してしまうと、DataFrame のセルに改行と字下げがそのまま入り、
+# "\n        " というエスケープ文字として表示されて読めなくなる。
+_HINT_SEP = "\n"
+
+
+def _balance_hint(attr: str, judgment: Optional[Dict[str, Any]]) -> str:
+    """バランス警告に添える「この n で回避できるのか」の案内。"""
+    if judgment is None:
+        # 候補数が大きく判定していない。従来どおり、対処法だけを示す。
+        return ""
+    n = judgment["n_profiles"]
+    if not judgment["auto_balance_balance"][attr]:
+        lines = [
+            f"この n（{n}）ならバランスの取れた設計が存在します。",
+            "design_profiles(..., auto_balance=True) で解消できます。",
+        ]
+    elif not judgment["balance_avoidable"][attr]:
+        lines = [
+            f"ただし、この n（{n}）では、どのプロファイルの"
+            "組み合わせを選んでもこの偏りは避けられません。",
+            "n_profiles を変えると均等にできる場合があります"
+            "（各属性の水準数の公倍数に近い値が候補です）。",
+        ]
+    else:
+        lines = [
+            "ただし auto_balance=True の設計でもこの偏りは残ります。",
+            "n_profiles を変えると解消する場合があります。",
+        ]
+    return _HINT_SEP.join(lines)
+
+
+def _correlation_hint(judgment: Optional[Dict[str, Any]]) -> str:
+    """相関警告に添える「この n で回避できるのか」の案内。
+
+    判定は「そのペアだけ避けられるか」ではなく「**相関の指摘が1つも出ない
+    設計が存在するか**」で行う。ペア単位で判定すると、避けたつもりが別の
+    ペアに移るだけの場合に「回避できます」と誤って案内してしまうため。
+    """
+    if judgment is None:
+        return ""
+    n = judgment["n_profiles"]
+    if not judgment["auto_balance_correlation"]:
+        lines = [
+            f"この n（{n}）なら相関の指摘が出ない設計が存在します。",
+            "design_profiles(..., auto_balance=True) で解消できます。",
+        ]
+    elif not judgment["correlation_avoidable"]:
+        lines = [
+            f"ただし、この n（{n}）では、どのプロファイルの"
+            "組み合わせを選んでも相関の指摘は残ります",
+            "（このペアだけを 0 にすることはできますが、別のペアに移るだけです）。",
+            "n_profiles を変えると解消する場合があります。",
+            "auto_balance=True は水準バランス専用で、相関は解消しません。",
+        ]
+    elif not judgment["both_avoidable"]:
+        lines = [
+            f"この n（{n}）でも相関の指摘が出ない組み合わせは"
+            "存在しますが、その設計は水準バランスを満たしません。",
+            "この n ではバランスと直交性の両方を満たす設計が存在しないためです。",
+            "どちらを優先するか選ぶか、n_profiles を変えてください。",
+        ]
+    else:
+        lines = [
+            f"この n（{n}）にはバランスと直交性の両方を満たす設計が存在しますが、",
+            "auto_balance=True は det(X'X) の最大化を優先するためそれを選びません。",
+            "プロファイルの組み合わせを見直すか、n_profiles を変えてください。",
+        ]
+    return _HINT_SEP.join(lines)
+
+
 @dataclass(frozen=True)
 class Diagnostic:
     """
@@ -134,16 +223,37 @@ class Diagnostic:
         警告本文（日本語）。何が起きているかの説明。
     recommendation : str
         対処方法の提案（日本語）。
+    hint : str, default ""
+        対処方法に添える補足（日本語）。``check_design`` の水準バランス・
+        属性間相関の警告で、「この n では回避できるのか」を調べた結果を
+        入れる。調べていない警告では空文字列。
+
+        1文ずつ改行で区切って持ち、字下げは付けない。表示側で整形する
+        （:meth:`hint_indented` / :meth:`hint_oneline`）。
     """
 
     severity: str
     category: str
     message: str
     recommendation: str
+    hint: str = ""
 
     def to_str(self) -> str:
         """1行の人間可読な文字列に変換する。"""
         return f"[{self.severity}] {self.message} → {self.recommendation}"
+
+    def hint_indented(self, indent: str = "        ") -> str:
+        """テキスト表示用に、各行を字下げした案内文を返す（無ければ空文字列）。
+
+        recommendation の直後に連結して使うため、先頭にも改行を付ける。
+        """
+        if not self.hint:
+            return ""
+        return "".join(f"\n{indent}{line}" for line in self.hint.split(_HINT_SEP))
+
+    def hint_oneline(self) -> str:
+        """DataFrame のセル用に、案内文を1行に連結して返す（無ければ空文字列）。"""
+        return "".join(self.hint.split(_HINT_SEP))
 
 
 # ---------------------------------------------------------------------------
@@ -195,7 +305,7 @@ class DesignCheckResult:
             lines.append("\n【警告】")
             for d in diags:
                 lines.append(f"  [{d.severity}] {d.message}")
-                lines.append(f"      → {d.recommendation}")
+                lines.append(f"      → {d.recommendation}{d.hint_indented()}")
         else:
             lines.append("\n警告はありません。")
 
@@ -203,10 +313,15 @@ class DesignCheckResult:
         return "\n".join(lines)
 
     def warnings(self) -> pd.DataFrame:
-        """警告一覧を DataFrame で返す。"""
+        """警告一覧を DataFrame で返す。
+
+        列は severity, category, message, recommendation, hint。
+        ``hint`` は「この n では回避できるのか」を調べた結果の案内文で、
+        調べていない警告では空文字列になる。
+        """
         if not self.diagnostics:
             return pd.DataFrame(
-                columns=["severity", "category", "message", "recommendation"]
+                columns=["severity", "category", "message", "recommendation", "hint"]
             )
         return pd.DataFrame(
             [
@@ -215,6 +330,8 @@ class DesignCheckResult:
                     "category": d.category,
                     "message": d.message,
                     "recommendation": d.recommendation,
+                    # 改行と字下げをそのままセルに入れると読めないので1行に連結する
+                    "hint": d.hint_oneline(),
                 }
                 for d in sorted(
                     self.diagnostics, key=lambda d: SEVERITY_ORDER.get(d.severity, 99)
@@ -494,6 +611,38 @@ def check_design(
     χ² 統計量の p 値は計算しない（scipy 不要とするため）。
     代わりに「χ² / 自由度」の比率と定性的な評価記号（◎○△）で判断する。
     p 値が必要な場合は ``from scipy.stats import chi2_contingency`` を使うこと。
+
+    **バランス・相関の警告に添える案内文は、状況によって変わる**
+
+    「プロファイルの組み合わせを見直してください」という助言は、その偏りや
+    相関がそのプロファイル数では構造的に避けられない場合、実行できない指示に
+    なる。そこで同じ属性・水準で作れる n プロファイルの設計をすべて調べ、
+    警告の出ない設計が存在するかによって案内を変えている。
+
+    * 回避できる場合   … ``design_profiles(..., auto_balance=True)`` で
+      解消できる旨を添える（実際にその関数が返す設計を同じ基準で評価して
+      確かめている）
+    * 回避できない場合 … その n では回避できないことを明示し、n_profiles を
+      変えることを案内する
+    * 判定しない場合   … 従来どおりの文言のまま
+
+    相関については「そのペアだけ避けられるか」ではなく「**相関の指摘が1つも
+    出ない設計が存在するか**」で判定する。特定のペアの |r| を下げても別のペアに
+    移るだけ、という状況が実際にあるため。
+
+    **判定しない場合がある**
+
+    候補の選び方の総数 C(N, n_profiles) が大きい場合（``design`` モジュールの
+    ``_REPORT_MAX_COMBINATIONS`` = 100,000 を超える場合）は判定しない。
+    ``check_design()`` は即座に返る関数であり、そこに数秒の列挙を持ち込まない
+    ため。``design_profiles(auto_balance=True)`` が総当たりに入る上限
+    （``_EXHAUSTIVE_MAX_COMBINATIONS`` = 1,000,000）とは別の、より低い値を使う。
+    利用者が明示的に最適化を依頼した関数と違い、報告する関数は所要時間が
+    設計の大きさで変わる理由が見えないため。水準が1つしかない属性がある
+    場合も、候補空間を復元できないため判定しない。
+
+    なお属性と水準は設計から推定するので、**設計に1度も現れない水準は
+    原理的に検出できない**（観測された水準がすべてであると仮定している）。
     """
     if not isinstance(profiles, pd.DataFrame):
         raise TypeError(
@@ -699,7 +848,7 @@ class ConjointResult:
             lines.append("【⚠️ 重大な注意事項（落とし穴チェック）】")
             for d in major:
                 lines.append(f"  ・[{d.severity}] {d.message}")
-                lines.append(f"      → {d.recommendation}")
+                lines.append(f"      → {d.recommendation}{d.hint_indented()}")
         if minor:
             lines.append("")
             lines.append(
@@ -793,10 +942,16 @@ class ConjointResult:
         if major:
             p.append("<p><strong>⚠️ 重大な注意事項</strong></p><ul>")
             for d in major:
+                hint_html = ""
+                if d.hint:
+                    hint_html = "".join(
+                        f"<br>&nbsp;&nbsp;&nbsp;&nbsp;{escape(line)}"
+                        for line in d.hint.split(_HINT_SEP)
+                    )
                 p.append(
                     f"<li><strong>[{escape(d.severity)}]</strong> "
                     f"{escape(d.message)}<br>"
-                    f"&nbsp;&nbsp;→ {escape(d.recommendation)}</li>"
+                    f"&nbsp;&nbsp;→ {escape(d.recommendation)}{hint_html}</li>"
                 )
             p.append("</ul>")
         if minor:
@@ -839,7 +994,9 @@ class ConjointResult:
             省略時はすべて返す。
         as_dataframe : bool, default True
             ``True`` なら ``pd.DataFrame``（列：severity, category, message,
-            recommendation）として返す。
+            recommendation, hint）として返す。``hint`` は
+            :func:`check_design` の水準バランス・属性間相関の警告に付く
+            「この n では回避できるのか」の案内で、他の警告では空文字列。
             ``False`` なら :class:`Diagnostic` オブジェクトのリストを返す。
 
         Returns
@@ -874,7 +1031,7 @@ class ConjointResult:
         if not diags:
             # 空でも列を持つ DataFrame を返す（呼び出し側で扱いやすくするため）
             return pd.DataFrame(
-                columns=["severity", "category", "message", "recommendation"]
+                columns=["severity", "category", "message", "recommendation", "hint"]
             )
 
         return pd.DataFrame(
@@ -884,6 +1041,8 @@ class ConjointResult:
                     "category": d.category,
                     "message": d.message,
                     "recommendation": d.recommendation,
+                    # 改行と字下げをそのままセルに入れると読めないので1行に連結する
+                    "hint": d.hint_oneline(),
                 }
                 for d in diags
             ]
@@ -2092,6 +2251,16 @@ def _design_diagnostics(
             )
         )
 
+    # バランス・相関の警告が1つでも出るなら、「この n では回避できるのか」を
+    # 判定して案内文に添える。警告が無ければ列挙する意味がないので判定しない。
+    judgment = None
+    if _has_balance_or_correlation_warning(balance_df, corr_df):
+        # 循環 import（analysis → _feasibility → analysis）を避けるため
+        # 呼び出し時に読み込む。
+        from . import _feasibility
+
+        judgment = _feasibility.judge_avoidability(profiles, attrs)
+
     # バランスチェック（閾値の定義は _balance_severity）
     for attr, row in balance_df.iterrows():
         cv = row["CV"]
@@ -2114,6 +2283,7 @@ def _design_diagnostics(
                 category=f"balance_{attr}",
                 message=message,
                 recommendation=recommendation,
+                hint=_balance_hint(str(attr), judgment),
             )
         )
 
@@ -2145,6 +2315,7 @@ def _design_diagnostics(
                     category=f"correlation_{col1}_{col2}",
                     message=message,
                     recommendation=recommendation,
+                    hint=_correlation_hint(judgment),
                 )
             )
 

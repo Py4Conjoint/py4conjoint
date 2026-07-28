@@ -382,6 +382,11 @@ def suggest_n_profiles(
     属性数・水準数・予定回答者数から「推奨プロファイル数」を計算し、
     その根拠とともに DataFrame で返す。
 
+    あわせて **要約を印字する**（choice の ``suggest_n_respondents()`` と
+    揃えた振る舞い）。印字するのは (1) 推奨値の根拠となる3基準、(2) 推奨された
+    n_profiles で「水準バランスと D 最適性が両立するか」の2点。**返り値の
+    DataFrame は印字の有無にかかわらず同じ**である。
+
     Parameters
     ----------
     attribute_levels : dict
@@ -450,6 +455,25 @@ def suggest_n_profiles(
     （``max_burden < p`` のとき）は p まで引き上げる。
     プロファイル数が p 未満だと、回答者を何人集めても設計行列が
     ランク落ちして回帰分析が実行できないため。
+
+    **バランスと D 最適性が両立するかの判定**
+
+    推奨された n_profiles について、``design_profiles(auto_balance=True)`` を
+    実際に実行して次のどれかを印字する。
+
+    * 両立する   … D 最適な設計がそのまま水準バランスも満たす
+      （``auto_balance`` は不要）
+    * 両立しない … その n では D 最適な設計が必ず不均衡になる。
+      ``auto_balance=True`` でバランスは取れるが det(X'X) が何 % に下がるかを示す
+    * 判定せず   … 候補が多く判定に時間がかかるため確認していない
+
+    判定するのは、候補の選び方の総数 C(N, n) が ``_REPORT_MAX_COMBINATIONS``
+    （= 100,000、実測で約0.4秒）以下の場合だけである。この関数は即座に返る
+    関数であり、待たされる理由が利用者に見えないため。``design_profiles`` が
+    総当たりに入る上限（``_EXHAUSTIVE_MAX_COMBINATIONS`` = 1,000,000）とは
+    別の、より低い値を使う。授業で使う規模はこの上限に収まる。
+    判定するのは表に現れる**相異なる推奨値**についてのみで、
+    表の全行について計算はしない（同じ n が繰り返されるため）。
 
     Examples
     --------
@@ -552,12 +576,90 @@ def suggest_n_profiles(
             "m_orme": min(m_orme, N),
         }
     )
+
+    # 要約を印字する（choice の suggest_n_respondents と揃えた振る舞い）。
+    # 返り値の DataFrame には手を加えない。
+    print(
+        "n_profiles の 3 基準: 統計的最低限 p / "
+        "Orme (2010) の経験則（符号化列数 × 2）/ 観測数条件"
+    )
+    print(
+        f"  p = {p}, Orme の目安 = {n_encoded} × 2 = {m_orme}, "
+        f"観測数条件 obs/pred ≥ {obs_per_predictor}（回答者数しだい・表の列を参照）"
+    )
+    recommended = sorted({int(row["推奨 n_profiles"]) for row in rows})
+    joined = ", ".join(str(v) for v in recommended)
+    print(
+        f"  → 推奨 n_profiles: {joined}"
+        f"（3基準の最大値を min(N={N}, max_burden={max_burden}) で上限制限）"
+    )
+    for m_rec in recommended:
+        print(_balance_note(attribute_levels, m_rec, N))
+
     return result
 
 
 # ---------------------------------------------------------------------------
 # 内部ヘルパー
 # ---------------------------------------------------------------------------
+
+
+def _format_ratio(ratio: float) -> str:
+    """det の比を「75%」「93.75%」のように、余分な 0 を付けずに表す。"""
+    return f"{ratio * 100:.4g}%"
+
+
+def _balance_note(
+    attribute_levels: Dict[str, List[Any]], n_profiles: int, n_candidates: int
+) -> str:
+    """推奨 n_profiles で「バランスと D 最適性が両立するか」の注記を作る。
+
+    判定には ``design_profiles(auto_balance=True)`` をそのまま使う。ただし
+    C(N, n) が ``_REPORT_MAX_COMBINATIONS`` 以下のときだけで、それを超える
+    ときは判定しない。``suggest_n_profiles()`` は即座に返る関数であり、
+    待たされる理由が利用者に見えないため。``design_profiles`` 自身が総当たり
+    に入る上限（``_EXHAUSTIVE_MAX_COMBINATIONS``）とは別の、より低い値である。
+    """
+    n_comb = math.comb(n_candidates, n_profiles)
+    if n_comb > _REPORT_MAX_COMBINATIONS:
+        return (
+            f"    ※ n = {n_profiles} でバランスと D 最適性が両立するかは"
+            "確認していません\n"
+            f"       （候補の組み合わせが {n_comb:,} 通りあり、判定に時間がかかるため）。\n"
+            "       design_profiles(..., auto_balance=True) を実行し、\n"
+            '       df.attrs["auto_balance"]["det_ratio"] で確認できます。'
+        )
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        try:
+            design = design_profiles(attribute_levels, n_profiles, auto_balance=True)
+        except ValueError:
+            return (
+                f"    ※ n = {n_profiles} ではバランスと D 最適性の両立を"
+                "判定できませんでした。"
+            )
+    info = design.attrs["auto_balance"]
+
+    if not info["balanced"]:
+        return (
+            f"    ※ n = {n_profiles} では、水準を均等にできる設計が存在しません。\n"
+            "       n_profiles を変えてください"
+            "（各属性の水準数の公倍数に近い値が候補です）。"
+        )
+    if info["det_ratio"] == 1.0:
+        return (
+            f"    ※ n = {n_profiles} なら、D 最適な設計がそのまま水準バランスも"
+            "満たします\n"
+            "       （auto_balance=True を指定する必要はありません）。"
+        )
+    return (
+        f"    ※ n = {n_profiles} では、D 最適な設計は必ずどこかの水準が"
+        "不均衡になります。\n"
+        "       design_profiles(..., auto_balance=True) ならバランスは取れますが、\n"
+        f"       det(X'X) は制約なしの {_format_ratio(info['det_ratio'])} に下がります。\n"
+        "       n_profiles を変えると両立する場合があります。"
+    )
 
 
 def _build_effect_matrix(
@@ -593,6 +695,18 @@ def _build_effect_matrix(
 # 速度の閾値であると同時に、厳密解か発見的探索かの境界でもある。
 # 根拠となる実測値は design_profiles の Notes を参照。
 _EXHAUSTIVE_MAX_COMBINATIONS = 1_000_000
+
+# 報告する関数（check_design / suggest_n_profiles）が「この n では回避できるか」
+# を判定する上限。上の _EXHAUSTIVE_MAX_COMBINATIONS より低くしてある。
+#
+# design_profiles(auto_balance=True) は利用者が明示的に最適化を依頼した関数
+# なので、1.5秒程度は許容される。一方 check_design と suggest_n_profiles は
+# 報告する関数で、即座に返ることが期待されている。しかも所要時間が設計の
+# 大きさで変わり、利用者には理由が見えない。
+#
+# 100,000 は実測で約0.4秒。授業規模は最大でも C = 43,758（3×3×2 の n=10）
+# なので、この上限でも教材での価値は失われない。
+_REPORT_MAX_COMBINATIONS = 100_000
 
 # 総当たりを何件ずつまとめて numpy に流すか（メモリと速度の兼ね合い）
 _EXHAUSTIVE_BATCH = 20_000
