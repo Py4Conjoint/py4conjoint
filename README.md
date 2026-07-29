@@ -22,10 +22,10 @@ Microsoft Forms / Google Forms のアンケート回答ファイルを読み込�
 pip install py4conjoint
 ```
 
-Google Colab では：
+Google Colab もしくは JupyterLite では：
 
 ```python
-!pip install py4conjoint
+%pip install py4conjoint
 ```
 
 ### Excel ファイル（.xlsx）を読む場合
@@ -56,12 +56,12 @@ pip install py4conjoint[excel-fast]
 import pandas as pd
 import py4conjoint.rating as pcr
 
-# プロファイル設計を作成（この4プロファイルは design_rating_2price.csv と同じ内容。
+# プロファイル設計を作成（この4プロファイルは レポジトリのexamples/ ある design_rating_2price.csv と同じ内容。
 # このように手で書いてもよいし、pd.read_csv("design_rating_2price.csv") で
 # 生成済みの CSV を読み込んで渡してもよい）
-profiles = { # P1         P2       P3         P4
-    "price":  [6,         6,       10,        10],
-    "os":     ["android", "apple", "android", "apple"],
+profiles = { # P1         P2        P3         P4
+    "price":  [6,         6,        10,        10],
+    "os":     ["android", "apple",  "android", "apple"],
     "camera": ["標準",    "高性能", "高性能",  "標準"],
 }
 
@@ -104,7 +104,7 @@ df_coded = pcr.encode(
 )
 
 # 回答者属性も 0/1 にしたい場合は respondent_encode を使います
-# （2水準の属性のみ。例：respondent_encode={"gender": ["女性", "male"]}）
+# （性別のような2水準の属性は respondent_encode={"gender": ["女性", "male"]} とかくことができる）
 ```
 
 #### 3. 回帰分析を実行する
@@ -114,29 +114,31 @@ result = pcr.fit(df_coded)
 print(result)
 ```
 
-> ※ 以下の出力例は別のデータセットのものです。表示される項目の形式を示すための
-> もので、上のコード例を実行して得られる数字ではありません。
+> ※ 以下は examples/ のデモデータで実際に実行した出力です。
+>  データや実装が変わると数字は変わります。
 
 ```
 ============================================================
 コンジョイント分析の結果（和文サマリー）
 ============================================================
-観測数         : 120
-説明変数の数   : 3
-決定係数 R²    : 0.9582
-自由度修正 R²  : 0.9571
+観測数        : 400
+説明変数の数  : 3
+決定係数 R²   : 0.6757
+自由度修正 R² : 0.6732
+標準誤差      : クラスタロバスト（respondent_id）
 
 【推定された係数（部分効用 part-worth）】
   変数                            係数        p値  有意性
   ------------------------- ---------- ----------  ------
-  Intercept                     4.2417     0.0000    ***
-  price_low                     1.2583     0.0000    ***
-  os_apple                      0.9083     0.0000    ***
-  camera_high                   0.5917     0.0000    ***
+  Intercept                     5.3350     0.0000  ***
+  price_low                     1.4450     0.0000  ***
+  os_apple                      0.7250     0.0000  ***
+  camera_high                   0.6150     0.0000  ***
 
   有意水準: *** p<0.001  ** p<0.01  * p<0.05  . p<0.1
 ============================================================
 ```
+
 
 #### 4. 結果を解釈する
 
@@ -169,8 +171,8 @@ result.market_share(products)
 #### 5. 可視化する
 
 ```python
-result.plot_importance()   # 重要度の棒グラフ
-result.plot_partworth()    # 部分効用の棒グラフ
+result.plot_importance()            # 重要度の棒グラフ
+result.plot_partworth()             # 部分効用の棒グラフ
 result.plot_wtp(price_unit="万円")  # WTPの棒グラフ
 ```
 
@@ -209,9 +211,9 @@ result.plot_wtp(price_unit="万円")  # WTPの棒グラフ
 | `wtp_extrapolation` | 中 | \|WTP\| > 価格レンジ × 2（外挿値） |
 
 ```python
-result.warnings()                        # すべての警告
-result.warnings(severity="大")           # 重大度「大」のみ
-result.warnings(category="r2_low")      # カテゴリでフィルタ
+result.warnings()                    # すべての警告
+result.warnings(severity="大")       # 重大度「大」のみ
+result.warnings(category="r2_low")   # カテゴリでフィルタ
 ```
 
 ## 選択型コンジョイント分析（choice / CBC）
@@ -224,6 +226,8 @@ result.warnings(category="r2_low")      # カテゴリでフィルタ
 import pandas as pd
 import py4conjoint.choice as pcc
 
+
+# プロファイル設計を作成
 attributes = {
     "price":  [6, 10],                  # 万円
     "os":     ["android", "apple"],
@@ -252,7 +256,7 @@ design.to_csv("design_choice_2price.csv", index=False)
 > 完全に同一にすること。** 属性名・水準・**水準の順序**・`seed`・`n_sets`・
 > `n_alts` が1つでも違うと、同じ `seed` でも別の設計になり、回答と代替案の
 > 対応が **エラーなく食い違って結果が誤ります**（例：本来 正 の係数が 負 に出る）。
-> 事故を防ぐため、design は作成後すぐ `design.to_csv(...)` で保存し、分析時は
+> このような問題を防ぐため、design は作成後すぐ `design.to_csv(...)` で保存し、分析時は
 > `pd.read_csv(...)` で**同じファイルを読み込んで**渡してください。2つの design が
 > 同一かは `pcc.design_signature(design)` の署名で確認できます。
 
@@ -273,7 +277,7 @@ df = pcc.forms_to_data(
 # Google Forms の場合は forms="google"、.csv ファイルを渡す
 ```
 
-> データは rating の例と同じくリポジトリの `examples/` にあり、
+> `responses_choice_2price.csv`は rating の例と同じくリポジトリの `examples/` にあり、
 > `python examples/make_demo_data.py` で再生成できます。
 
 #### 3. 符号化する
@@ -295,31 +299,34 @@ result = pcc.fit(
 print(result)
 ```
 
-> ※ 以下の出力例は別のデータセット（yogurt）のものです。表示される項目の形式を
-> 示すためのもので、上のコード例を実行して得られる数字ではありません。
+> ※ 以下は examples/ のデモデータで実際に実行した出力です。
+>  データや実装が変わると数字は変わります。
 
 ```
 ============================================================
 選択型コンジョイント分析の結果（和文サマリー）
 ============================================================
-観測数（行数）              : 9648
-選択セット数                : 2412
-説明変数の数                : 5
-対数尤度                    : -2656.8879
-擬似決定係数 R²（McFadden） : 0.2054
-標準誤差                    : クラスタロバスト（id）
+観測数（行数）                       : 1800
+選択セット数（回答者数 × 設問数/人） : 600（100 × 6/人）
+説明変数の数                         : 3
+対数尤度                             : -557.7745
+擬似決定係数 R²（McFadden）          : 0.1538
+標準誤差                             : クラスタロバスト（respondent_id）
 
 【推定された係数（部分効用 part-worth）】
   変数                            係数        p値  有意性
   ------------------------- ---------- ----------  ------
-  price                        -0.3666     0.0000    ***
-  ...
+  price                        -0.3261     0.0000  ***
+  os_apple                      0.6533     0.0000  ***
+  camera_高性能                 0.4605     0.0002  ***
+
+  有意水準: *** p<0.001  ** p<0.01  * p<0.05  . p<0.1
 ============================================================
 ```
 
 > 各回答者が同じ設問数に答える設計（バランス済み）では、「選択セット数」行に
-> 内訳が付き `選択セット数（回答者数 × 設問数/人）: 180（30 × 6/人）` のように
-> 表示されます（上のヨーグルトデータは世帯ごとに購買回数が異なるため総数のみ）。
+> 内訳が付き `選択セット数（回答者数 × 設問数/人）: 600（100 × 6/人）` のように
+> 表示されます。
 
 #### 5. 結果を解釈する
 
@@ -387,7 +394,7 @@ Microsoft Forms の回答ファイルは `.xlsx` / `.csv` のどちらでも読�
 **`.csv` を推奨します**。理由は2つあります。
 
 - Excel を読むための追加パッケージ（`py4conjoint[excel]`）が不要
-- ブラウザ上で動く Jupyter でファイルが壊れることがない
+- ブラウザ上で動く Jupyter（JupyterLite / Pyodide）でファイルが壊れることがない
 
 手順は次のとおりです。
 
@@ -404,7 +411,7 @@ df = pcr.forms_to_data(
 )
 ```
 
-`forms="google"` に変える必要はありません。`forms` は「どの Forms で
+`forms="google"` の引数を使う必要はありません。`forms` は「どの Forms で
 集めたか」を指定する引数で、ファイル形式を指定するものではないためです。
 
 ## ブラウザ版 Jupyter（JupyterLite / Pyodide）で使う場合
