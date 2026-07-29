@@ -56,22 +56,24 @@ pip install py4conjoint[excel-fast]
 import pandas as pd
 import py4conjoint.rating as pcr
 
-# プロファイル設計を作成
-profiles = { # P1         P2       P3        P4
-    "price":  [6,         10,      6,        10],
-    "os":     ["android", "apple", "apple",  "android"],
-    "camera": ["標準",    "標準",  "高性能", "高性能"],
+# プロファイル設計を作成（この4プロファイルは design_rating_2price.csv と同じ内容。
+# このように手で書いてもよいし、pd.read_csv("design_rating_2price.csv") で
+# 生成済みの CSV を読み込んで渡してもよい）
+profiles = { # P1         P2       P3         P4
+    "price":  [6,         6,       10,        10],
+    "os":     ["android", "apple", "android", "apple"],
+    "camera": ["標準",    "高性能", "高性能",  "標準"],
 }
 
 # Microsoft Forms の回答ファイルを読み込む（デフォルト）
 # .csv も渡せます（推奨。→「Microsoft Forms のデータを使う」節）
 df = pcr.forms_to_data(
-    responses_file  = "responses.xlsx",
+    responses_file  = "responses_rating_2price.csv",
     profiles        = profiles,
-    respondent_cols = {"性別": "gender"},
+    respondent_cols = {"あなたの性別を教えてください。": "gender"},
 )
 
-# Google Forms の場合
+# Google Forms の場合（ファイル名は例。forms="google" の書き方を示すもの）
 df = pcr.forms_to_data(
     responses_file  = "responses.csv",
     profiles        = profiles,
@@ -79,6 +81,10 @@ df = pcr.forms_to_data(
     forms           = "google",
 )
 ```
+
+> **データの入手先**：`responses_rating_2price.csv` などのコード例で使うデータは、
+> リポジトリの `examples/` にあります（`pip install` には含まれません）。
+> `python examples/make_demo_data.py` で再生成できます。
 
 #### 2. 符号化する
 
@@ -94,11 +100,11 @@ df_coded = pcr.encode(
         "price":  "low",
         "os":     "apple",
         "camera": "high"
-    },
-    respondent_encode = {
-        "gender": ["女性", "male"]
     }
 )
+
+# 回答者属性も 0/1 にしたい場合は respondent_encode を使います
+# （2水準の属性のみ。例：respondent_encode={"gender": ["女性", "male"]}）
 ```
 
 #### 3. 回帰分析を実行する
@@ -107,6 +113,9 @@ df_coded = pcr.encode(
 result = pcr.fit(df_coded)
 print(result)
 ```
+
+> ※ 以下の出力例は別のデータセットのものです。表示される項目の形式を示すための
+> もので、上のコード例を実行して得られる数字ではありません。
 
 ```
 ============================================================
@@ -134,22 +143,17 @@ print(result)
 ```python
 # 重要度（合計100%）
 result.importance()
-#            効用範囲   重要度
-# 属性
-# price       2.5167   45.62
-# os          1.8167   32.94
-# camera      1.1833   21.44
+# → 属性を行、「効用範囲」と「重要度」を列とする DataFrame
+#   （重要度は合計が 100 になるように正規化した値）
 
 # WTP（限界支払意思額）
 result.wtp()
-#                      係数  限界支払意思額
-# 属性（符号化列名）
-# os_apple           0.9083         2.8874
-# camera_high        0.5917         1.8805
+# → 符号化列名を行、「係数」と「限界支払意思額」を列とする DataFrame
+#   （価格以外の属性について、価格何単位分に相当するか）
 
 # 評点1点の金額換算
 result.unit_rating_money()
-# 1.5894
+# → 評点が1点上がることに相当する金額（float）
 
 # 市場シェア予測
 products = pd.DataFrame({
@@ -159,8 +163,7 @@ products = pd.DataFrame({
 }, index=["製品A", "製品B"])
 
 result.market_share(products)
-# 製品A    0.926
-# 製品B    0.074
+# → 製品ごとの予測シェア（合計が 1 になる Series）
 ```
 
 #### 5. 可視化する
@@ -175,8 +178,8 @@ result.plot_wtp(price_unit="万円")  # WTPの棒グラフ
 
 | 関数 / メソッド | 説明 |
 |----------------|------|
-| `forms_to_data()` | Microsoft/Google Forms の回答ファイルを long 形式 DataFrame に変換 |
-| `design_profiles()` | D 最適計画法によるプロファイル設計 |
+| `forms_to_data()` | Microsoft/Google Forms の回答ファイルを long 形式 DataFrame に変換（`rating_range` で評点の値域を指定できる） |
+| `design_profiles()` | D 最適計画法によるプロファイル設計（`auto_balance=True` で水準バランスを優先できる） |
 | `check_design()` | プロファイル設計の直交性チェック |
 | `suggest_n_profiles()` | 推奨プロファイル数の目安 |
 | `encode()` | 属性列を効果コーディング（-1/+1）に自動変換 |
@@ -221,25 +224,28 @@ result.warnings(category="r2_low")      # カテゴリでフィルタ
 import pandas as pd
 import py4conjoint.choice as pcc
 
-# 選択セット（設問）を生成：8設問 × 3代替案
+attributes = {
+    "price":  [6, 10],                  # 万円
+    "os":     ["android", "apple"],
+    "camera": ["標準", "高性能"],
+}
+
+# 選択セット（設問）を生成：6設問 × 3代替案
 design = pcc.design_choice_sets(
-    {"price": [100, 150, 200], "brand": ["A社", "B社", "C社"]},
-    n_sets=8,
+    attributes,
+    n_sets=6,
     n_alts=3,
-    seed=42,
+    seed=180,
 )
 
 # 設計の品質を診断（バランス・独立性・オーバーラップ）
 print(pcc.check_design(design).summary())
 
 # 必要回答者数の目安（Johnson-Orme の経験則 n ≥ 500c/(t×a)）
-pcc.suggest_n_respondents(
-    {"price": [100, 150, 200], "brand": ["A社", "B社", "C社"]},
-    n_sets=8, n_alts=3,
-)
+pcc.suggest_n_respondents(attributes, n_sets=6, n_alts=3)
 
 # 作成した設計はすぐ保存し、分析時は作り直さず読み込んで使う（下の警告を参照）
-design.to_csv("design.csv", index=False)
+design.to_csv("design_choice_2price.csv", index=False)
 ```
 
 > ⚠️ **アンケート作成に使った design と、`forms_to_data()` に渡す design は
@@ -255,21 +261,27 @@ design.to_csv("design.csv", index=False)
 ```python
 # 1設問 = 1選択セット。回答選択肢（例：「製品A」「製品B」「製品C」）が代替案
 # .csv も渡せます（推奨。→「Microsoft Forms のデータを使う」節）
+# 設計は作り直さず、step 1 で保存したファイルを読み込んで使う
+design = pd.read_csv("design_choice_2price.csv")
+
 df = pcc.forms_to_data(
-    responses_file = "responses.xlsx",
+    responses_file = "responses_choice_2price.csv",
     design         = design,
-    choice_labels  = ["A", "B", "C"],   # 回答文字列に含まれるラベル（alt_id の順）
+    choice_labels  = ["製品A", "製品B", "製品C"],   # 回答文字列に含まれるラベル（alt_id の順）
 )
 
 # Google Forms の場合は forms="google"、.csv ファイルを渡す
 ```
 
+> データは rating の例と同じくリポジトリの `examples/` にあり、
+> `python examples/make_demo_data.py` で再生成できます。
+
 #### 3. 符号化する
 
 ```python
 # ダミーコーディング（0/1）。基準水準の効用が 0 に固定される
-df_coded = pcc.encode(df, reference_levels={"brand": "A社"})
-# → brand_B社, brand_C社 列が追加される（価格などの数値変数はそのまま使う）
+df_coded = pcc.encode(df, reference_levels={"os": "android", "camera": "標準"})
+# → os_apple, camera_高性能 列が追加される（価格などの数値変数はそのまま使う）
 ```
 
 #### 4. 条件付きロジットを推定する
@@ -282,6 +294,9 @@ result = pcc.fit(
 )
 print(result)
 ```
+
+> ※ 以下の出力例は別のデータセット（yogurt）のものです。表示される項目の形式を
+> 示すためのもので、上のコード例を実行して得られる数字ではありません。
 
 ```
 ============================================================
@@ -315,9 +330,9 @@ result.warnings()        # 落とし穴チェック
 
 # 市場シェア予測（ダミー列は 0/1、数値列は実際の値）
 products = pd.DataFrame({
-    "price":    [100, 150],
-    "brand_B社": [1, 0],
-    "brand_C社": [0, 1],
+    "price":        [6, 10],
+    "os_apple":     [1,  0],
+    "camera_高性能": [1,  1],
 }, index=["製品X", "製品Y"])
 
 result.market_share(products)
